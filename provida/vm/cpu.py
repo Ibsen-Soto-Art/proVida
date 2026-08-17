@@ -1,3 +1,6 @@
+import random
+
+from provida.mutation.sustitucion import copiar_con_mutacion
 from provida.vm.instructions import Instruccion
 
 # Los registros son enteros sin signo de 32 bits. No es un requisito del
@@ -20,7 +23,12 @@ class CPU:
     decide que deja de existir.
     """
 
-    def __init__(self, genoma: list[Instruccion]):
+    def __init__(
+        self,
+        genoma: list[Instruccion],
+        tasa_mutacion: float = 0.0,
+        rng: random.Random | None = None,
+    ):
         if not genoma:
             raise ValueError("El genoma no puede estar vacío: no habría IP válido.")
         self.genoma = genoma
@@ -37,6 +45,15 @@ class CPU:
         self.write_head = 0
         self.genoma_hijo: list[Instruccion | None] | None = None
         self.replicacion_completa = False
+
+        # Mutación por sustitución (Fase 4, sub-fase 3). El valor por
+        # defecto es 0.0 -- no 0.0075 -- para que la CPU sea determinista
+        # a menos que alguien pida explícitamente lo contrario; así las
+        # demos y pruebas de las sub-fases 1 y 2 (que asumen copia exacta)
+        # siguen funcionando sin cambios.
+        self.tasa_mutacion = tasa_mutacion
+        self.rng = rng if rng is not None else random.Random()
+        self.mutaciones_ocurridas = 0
 
     def _leer(self, registro: str) -> int:
         return self.registros[registro]
@@ -121,7 +138,13 @@ class CPU:
             # no hay dónde más escribir. Evita un IndexError por un genoma
             # que ejecuta más h-copy de los que necesita.
             if self.write_head < len(self.genoma_hijo):
-                self.genoma_hijo[self.write_head] = self.genoma[self.read_head]
+                instruccion_original = self.genoma[self.read_head]
+                instruccion_final, hubo_mutacion = copiar_con_mutacion(
+                    instruccion_original, self.tasa_mutacion, len(self.genoma), self.rng
+                )
+                self.genoma_hijo[self.write_head] = instruccion_final
+                if hubo_mutacion:
+                    self.mutaciones_ocurridas += 1
                 self.write_head += 1
             self.read_head = (self.read_head + 1) % len(self.genoma)
 
