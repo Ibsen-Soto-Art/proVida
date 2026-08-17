@@ -20,6 +20,13 @@ analisis = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# Sin esto, setuptools se confunde con otras carpetas de nivel superior
+# (ej. sitio/, usada por el build del sitio estático de la Fase 8) y las
+# trata como si fueran paquetes de Python instalables, cuando solo
+# provida/ lo es.
+include = ["provida*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
