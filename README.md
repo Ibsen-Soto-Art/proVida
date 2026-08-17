@@ -14,6 +14,7 @@ En desarrollo activo. Ver [docs/](docs/) para la documentación completa de dise
 - [Glosario](docs/glosario.md) — términos técnicos con su analogía biológica.
 - [Arquitectura](docs/arquitectura.md) — diseño de la VM, el lenguaje de instrucciones, el motor de mundo/población, mutación y tareas lógicas.
 - [Testing](docs/testing.md) — estrategia de pruebas: determinista, estadística, emergente y de regresión.
+- [Observabilidad](docs/observabilidad.md) — qué métricas se registran, "generación" como profundidad de linaje, y las gráficas del laboratorio.
 
 ## Stack
 
@@ -39,7 +40,10 @@ python3 examples/demo_mutacion.py            # mutación durante la copia
 python3 examples/demo_poblacion.py           # una rejilla se llena de organismos
 python3 examples/demo_tareas.py              # tareas lógicas como fuente de merit
 python3 examples/demo_seleccion_natural.py   # selección natural emergente, verificada
+python3 examples/demo_laboratorio.py         # gráficas: fitness, generación y árbol filogenético
 ```
+
+El último requiere las dependencias de análisis: `pip install -e ".[analisis]"`.
 
 ## Licencia
 

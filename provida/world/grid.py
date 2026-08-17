@@ -1,5 +1,6 @@
 import random
 
+from provida.metrics.registro import RegistroEventos
 from provida.vm.cpu import CPU
 
 # Los 8 desplazamientos del vecindario de Moore (las 8 celdas alrededor de
@@ -24,15 +25,35 @@ class Mundo:
     propaga más" como una señal de selección natural.
     """
 
-    def __init__(self, ancho: int, alto: int, rng: random.Random | None = None):
+    def __init__(
+        self,
+        ancho: int,
+        alto: int,
+        rng: random.Random | None = None,
+        registro: RegistroEventos | None = None,
+    ):
         self.ancho = ancho
         self.alto = alto
         self.celdas: list[list[CPU | None]] = [[None] * ancho for _ in range(alto)]
         self.rng = rng if rng is not None else random.Random()
         self.nacimientos = 0
         self.reemplazos = 0
+        self.turno = 0
+
+        # Registro de eventos opcional (Fase 6): si no se pasa ninguno, el
+        # mundo funciona exactamente igual que antes -- observar la
+        # simulación es un extra, no un requisito para que corra.
+        self.registro = registro
+        self._siguiente_id = 0
+
+    def _nuevo_id(self) -> int:
+        id_ = self._siguiente_id
+        self._siguiente_id += 1
+        return id_
 
     def colocar(self, cpu: CPU, fila: int, columna: int) -> None:
+        if cpu.id_organismo is None:
+            cpu.id_organismo = self._nuevo_id()
         self.celdas[fila][columna] = cpu
 
     def organismos_vivos(self) -> list[tuple[int, int, CPU]]:
@@ -62,6 +83,7 @@ class Mundo:
         elegido en cada sorteo, lo cual en promedio produce el mismo
         efecto sobre muchos turnos.
         """
+        self.turno += 1
         vivos = self.organismos_vivos()
         if not vivos:
             return
@@ -91,6 +113,9 @@ class Mundo:
             rng=cpu_padre.rng,
             merit=cpu_padre.merit,
             ambiente=cpu_padre.ambiente,
+            id_organismo=self._nuevo_id(),
+            generacion=cpu_padre.generacion + 1,
+            id_padre=cpu_padre.id_organismo,
         )
         # La cría hereda también qué tareas ya tiene "acreditadas" -- si no,
         # al ejecutar el mismo genoma y volver a resolver las mismas
@@ -105,6 +130,9 @@ class Mundo:
             self.reemplazos += 1
         self.celdas[f_destino][c_destino] = cpu_hijo
         self.nacimientos += 1
+
+        if self.registro is not None:
+            self.registro.registrar_nacimiento(self.turno, cpu_hijo, cpu_padre)
 
         # El padre "renace" para poder intentar reproducirse de nuevo:
         # conserva su genoma y su merit, pero su estado de ejecución

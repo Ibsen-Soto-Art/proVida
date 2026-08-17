@@ -24,6 +24,9 @@ class CPU:
         rng: random.Random | None = None,
         merit: float = 1.0,
         ambiente: Ambiente | None = None,
+        id_organismo: int | None = None,
+        generacion: int = 0,
+        id_padre: int | None = None,
     ):
         if not genoma:
             raise ValueError("El genoma no puede estar vacío: no habría IP válido.")
@@ -64,6 +67,15 @@ class CPU:
         self.ambiente = ambiente
         self.ultimos_inputs: list[int] = []
         self.tareas_resueltas: set[str] = set()
+
+        # Metadatos de linaje (Fase 6): no afectan la ejecución en absoluto
+        # -- son puramente para observabilidad (el registro de eventos y el
+        # árbol filogenético). `generacion` es la profundidad del linaje
+        # (cuántos ancestros hasta el fundador), no un contador de tiempo
+        # global sincronizado -- ver docs/glosario.md.
+        self.id_organismo = id_organismo
+        self.generacion = generacion
+        self.id_padre = id_padre
 
     def _leer(self, registro: str) -> int:
         return self.registros[registro]

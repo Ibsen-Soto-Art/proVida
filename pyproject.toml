@@ -10,6 +10,11 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
 ]
+analisis = [
+    "matplotlib>=3.8",
+    "pandas>=2.2",
+    "networkx>=3.2",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
