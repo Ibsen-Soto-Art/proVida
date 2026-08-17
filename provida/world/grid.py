@@ -90,7 +90,15 @@ class Mundo:
             tasa_mutacion=cpu_padre.tasa_mutacion,
             rng=cpu_padre.rng,
             merit=cpu_padre.merit,
+            ambiente=cpu_padre.ambiente,
         )
+        # La cría hereda también qué tareas ya tiene "acreditadas" -- si no,
+        # al ejecutar el mismo genoma y volver a resolver las mismas
+        # tareas que su padre, cobraría el bono de nuevo, y el merit se
+        # inflaría sin límite en cada generación aunque el comportamiento
+        # sea idéntico. Una mutación SÍ puede hacer que la cría descubra
+        # una tarea nueva que su linaje no tenía -- eso sigue pagando.
+        cpu_hijo.tareas_resueltas = set(cpu_padre.tareas_resueltas)
 
         f_destino, c_destino = self._vecino_aleatorio(fila, columna)
         if self.celdas[f_destino][c_destino] is not None:

@@ -1,15 +1,9 @@
 import random
 
 from provida.mutation.sustitucion import copiar_con_mutacion
-from provida.vm.instructions import Instruccion
-
-# Los registros son enteros sin signo de 32 bits. No es un requisito del
-# hardware (esto es una VM simulada en Python, que maneja enteros de
-# precisión arbitraria por defecto) -- es una elección deliberada para que
-# `nand` opere sobre un ancho de bits fijo y con sentido, y para que `add`/
-# `inc` se desborden de forma predecible en vez de crecer sin límite.
-ANCHO_REGISTRO_BITS = 32
-MASCARA_REGISTRO = (1 << ANCHO_REGISTRO_BITS) - 1
+from provida.tasks.ambiente import Ambiente
+from provida.tasks.logicas import HISTORIAL_INPUTS_MAXIMO, BONUS_MERITO, tareas_resueltas_por_output
+from provida.vm.instructions import MASCARA_REGISTRO, Instruccion
 
 
 class CPU:
@@ -29,6 +23,7 @@ class CPU:
         tasa_mutacion: float = 0.0,
         rng: random.Random | None = None,
         merit: float = 1.0,
+        ambiente: Ambiente | None = None,
     ):
         if not genoma:
             raise ValueError("El genoma no puede estar vacío: no habría IP válido.")
@@ -58,10 +53,17 @@ class CPU:
 
         # Merit: determina la probabilidad de que el planificador de la
         # población elija a este organismo para ejecutar en cada turno
-        # (ver provida/world/grid.py). En esta sub-fase el valor por
-        # defecto es uniforme (1.0) para todos -- las tareas lógicas que
-        # lo modifican llegan en la sub-fase 5.
+        # (ver provida/world/grid.py). Empieza uniforme (1.0 por defecto)
+        # y las tareas lógicas resueltas lo multiplican (ver `output`).
         self.merit = merit
+
+        # Ambiente y tareas lógicas (Fase 4, sub-fase 5). Sin ambiente,
+        # `input`/`output` no tienen efecto -- un organismo cuyo genoma
+        # las use, pero que se ejecute de forma aislada sin ambiente, no
+        # debe fallar, solo no ganar merit por tareas.
+        self.ambiente = ambiente
+        self.ultimos_inputs: list[int] = []
+        self.tareas_resueltas: set[str] = set()
 
     def _leer(self, registro: str) -> int:
         return self.registros[registro]
@@ -167,6 +169,27 @@ class CPU:
             # debe poder penalizar más adelante.
             if self.genoma_hijo is not None and all(i is not None for i in self.genoma_hijo):
                 self.replicacion_completa = True
+
+        elif instr.opcode == "input":
+            (r,) = instr.args
+            if self.ambiente is not None:
+                valor = self.ambiente.generar_input(self.rng)
+                self._escribir(r, valor)
+                self.ultimos_inputs.append(valor)
+                if len(self.ultimos_inputs) > HISTORIAL_INPUTS_MAXIMO:
+                    self.ultimos_inputs.pop(0)
+
+        elif instr.opcode == "output":
+            (r,) = instr.args
+            if self.ambiente is not None:
+                valor = self._leer(r)
+                for tarea in tareas_resueltas_por_output(self.ultimos_inputs, valor):
+                    # Cada tarea solo paga la primera vez que este
+                    # organismo la resuelve -- si no, bastaría con repetir
+                    # el mismo output para inflar el merit sin límite.
+                    if tarea not in self.tareas_resueltas:
+                        self.tareas_resueltas.add(tarea)
+                        self.merit *= BONUS_MERITO[tarea]
 
         else:
             raise ValueError(f"Opcode no soportado en esta sub-fase: {instr.opcode!r}")

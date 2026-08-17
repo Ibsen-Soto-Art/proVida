@@ -1,5 +1,12 @@
 from typing import NamedTuple
 
+# Los registros son enteros sin signo de 32 bits. Vive aquí (y no en cpu.py)
+# porque tanto la CPU como el verificador de tareas lógicas (provida/tasks)
+# necesitan conocer el ancho de palabra, y este módulo no depende de
+# ninguno de los dos -- evita una dependencia circular entre ellos.
+ANCHO_REGISTRO_BITS = 32
+MASCARA_REGISTRO = (1 << ANCHO_REGISTRO_BITS) - 1
+
 
 class Instruccion(NamedTuple):
     """Una instrucción del genoma: un opcode y sus operandos.
@@ -17,10 +24,7 @@ class Instruccion(NamedTuple):
     args: tuple = ()
 
 
-# Aridad (número de operandos) de cada opcode soportado hasta esta sub-fase.
-# Sirve de referencia y de validación rápida al construir genomas a mano;
-# las instrucciones de entrada/salida (input, output) se añaden en la
-# sub-fase 5, cuando exista un ambiente que les dé sentido.
+# Aridad (número de operandos) de cada opcode del set completo del MVP.
 ARIDAD_OPCODES = {
     "nop": 0,
     "mov": 2,
@@ -38,4 +42,9 @@ ARIDAD_OPCODES = {
     "h-alloc": 0,
     "h-copy": 0,
     "h-divide": 0,
+    # Entrada/salida con el ambiente (Fase 4, sub-fase 5): permiten que un
+    # organismo reciba bits del entorno y entregue resultados, que el
+    # ambiente evalúa contra las tareas lógicas conocidas.
+    "input": 1,
+    "output": 1,
 }
