@@ -1,9 +1,17 @@
 import random
 
-from provida.mutation.sustitucion import copiar_con_mutacion
+from provida.mutation.sustitucion import procesar_copia
 from provida.tasks.ambiente import Ambiente
 from provida.tasks.logicas import HISTORIAL_INPUTS_MAXIMO, BONUS_MERITO, tareas_resueltas_por_output
-from provida.vm.instructions import MASCARA_REGISTRO, Instruccion
+from provida.vm.instructions import COMPLEMENTO_NOP, MASCARA_REGISTRO, NOPS_ETIQUETA, Instruccion
+
+# Límite de seguridad para el crecimiento del genoma hijo (Fase 7): un
+# organismo cuyo bucle de copia nunca detecta "vuelta completa" (por una
+# etiqueta rota, por ejemplo) podría seguir copiando para siempre. Este
+# tope no es un concepto biológico -- es una salvaguarda de que la
+# simulación no consuma memoria sin límite por un genoma patológico.
+LONGITUD_MAXIMA_HIJO_RELATIVA = 4
+LONGITUD_MINIMA_HIJO = 1
 
 
 class CPU:
@@ -27,6 +35,8 @@ class CPU:
         id_organismo: int | None = None,
         generacion: int = 0,
         id_padre: int | None = None,
+        tasa_insercion: float = 0.0,
+        tasa_delecion: float = 0.0,
     ):
         if not genoma:
             raise ValueError("El genoma no puede estar vacío: no habría IP válido.")
@@ -37,22 +47,30 @@ class CPU:
         self.instrucciones_ejecutadas = 0
 
         # Estado de auto-replicación. `genoma_hijo` es None hasta que el
-        # organismo ejecuta `h-alloc` -- intentar copiar sin haber
-        # reservado espacio antes es un error del genoma, no algo que la
-        # CPU deba tolerar en silencio (ver `h-copy` más abajo).
+        # organismo ejecuta `h-alloc`. A partir de la Fase 7 es una lista
+        # que CRECE con cada h-copy (no un arreglo de tamaño fijo) --
+        # necesario para que la inserción/deleción puedan cambiar el
+        # tamaño de la cría. Intentar copiar sin haber reservado espacio
+        # antes no es un error -- ver `h-copy` más abajo.
         self.read_head = 0
         self.write_head = 0
-        self.genoma_hijo: list[Instruccion | None] | None = None
+        self.genoma_hijo: list[Instruccion] | None = None
         self.replicacion_completa = False
 
-        # Mutación por sustitución (Fase 4, sub-fase 3). El valor por
-        # defecto es 0.0 -- no 0.0075 -- para que la CPU sea determinista
-        # a menos que alguien pida explícitamente lo contrario; así las
-        # demos y pruebas de las sub-fases 1 y 2 (que asumen copia exacta)
-        # siguen funcionando sin cambios.
+        # Mutación por sustitución (Fase 4, sub-fase 3), y por
+        # inserción/deleción (Fase 7). Los valores por defecto son 0.0
+        # para que la CPU sea determinista a menos que alguien pida
+        # explícitamente lo contrario; así las demos y pruebas de las
+        # sub-fases anteriores (que asumen copia exacta) siguen
+        # funcionando sin cambios.
         self.tasa_mutacion = tasa_mutacion
+        self.tasa_insercion = tasa_insercion
+        self.tasa_delecion = tasa_delecion
         self.rng = rng if rng is not None else random.Random()
         self.mutaciones_ocurridas = 0
+        self.mutaciones_sustitucion = 0
+        self.mutaciones_insercion = 0
+        self.mutaciones_delecion = 0
 
         # Merit: determina la probabilidad de que el planificador de la
         # población elija a este organismo para ejecutar en cada turno
@@ -83,10 +101,43 @@ class CPU:
     def _escribir(self, registro: str, valor: int) -> None:
         self.registros[registro] = valor & MASCARA_REGISTRO
 
+    def _leer_etiqueta_propia(self) -> list[str]:
+        """Lee los nop-a/b/c que siguen inmediatamente a la instrucción
+        actual -- esa secuencia es "mi etiqueta". Se detiene en la primera
+        instrucción que no sea un nop de etiqueta."""
+        etiqueta = []
+        pos = (self.ip + 1) % len(self.genoma)
+        for _ in range(len(self.genoma)):
+            opcode = self.genoma[pos].opcode
+            if opcode not in NOPS_ETIQUETA:
+                break
+            etiqueta.append(opcode)
+            pos = (pos + 1) % len(self.genoma)
+        return etiqueta
+
+    def _buscar_complemento(self, etiqueta: list[str]) -> int | None:
+        """Busca, circularmente, la primera aparición de la secuencia
+        COMPLEMENTARIA a `etiqueta` en el genoma, empezando justo después
+        de la etiqueta propia. Devuelve la posición justo después de esa
+        aparición (el destino del salto), o None si no se encontró -- una
+        etiqueta vacía o rota simplemente no tiene destino."""
+        if not etiqueta:
+            return None
+        complemento = [COMPLEMENTO_NOP[nop] for nop in etiqueta]
+        n = len(self.genoma)
+        m = len(complemento)
+        inicio = (self.ip + 1 + len(etiqueta)) % n
+        for desplazamiento in range(n):
+            pos = (inicio + desplazamiento) % n
+            if [self.genoma[(pos + k) % n].opcode for k in range(m)] == complemento:
+                return (pos + m) % n
+        return None
+
     def step(self) -> None:
         """Ejecuta la instrucción en el IP actual y avanza el IP."""
         instr = self.genoma[self.ip]
         salto = None  # desplazamiento relativo, solo si la instrucción es un salto
+        salto_absoluto = None  # posición absoluta, solo para saltos por etiqueta (Fase 7)
 
         if instr.opcode == "nop":
             pass
@@ -138,12 +189,11 @@ class CPU:
                 salto = offset
 
         elif instr.opcode == "h-alloc":
-            # Reserva un genoma hijo del mismo tamaño que el propio y
-            # reinicia los heads. En el MVP el genoma nunca cambia de
-            # tamaño (solo hay mutación por sustitución), así que reservar
-            # exactamente `len(self.genoma)` casillas es suficiente -- en
-            # un modelo con inserción/deleción habría que reservar de más.
-            self.genoma_hijo = [None] * len(self.genoma)
+            # Empieza la cría vacía y reinicia los heads. Antes de la
+            # Fase 7 esto reservaba un arreglo de tamaño fijo -- ahora la
+            # cría crece con cada h-copy, así que no hace falta (ni tiene
+            # sentido) saber su tamaño final de antemano.
+            self.genoma_hijo = []
             self.read_head = 0
             self.write_head = 0
             self.replicacion_completa = False
@@ -156,30 +206,40 @@ class CPU:
             # continua e independiente, no hay quien valide de antemano
             # que cada uno llame a sus instrucciones en el orden "correcto".
             if self.genoma_hijo is not None:
-                # Si la cría ya está llena, la copia tampoco tiene efecto
-                # -- el read_head sigue avanzando (más abajo), pero no hay
-                # dónde más escribir. Evita un IndexError por un genoma
-                # que ejecuta más h-copy de los que necesita.
-                if self.write_head < len(self.genoma_hijo):
+                tope = LONGITUD_MAXIMA_HIJO_RELATIVA * len(self.genoma)
+                if len(self.genoma_hijo) < tope:
                     instruccion_original = self.genoma[self.read_head]
-                    instruccion_final, hubo_mutacion = copiar_con_mutacion(
-                        instruccion_original, self.tasa_mutacion, len(self.genoma), self.rng
+                    nuevas_instrucciones, tipo_evento = procesar_copia(
+                        instruccion_original,
+                        self.tasa_mutacion,
+                        len(self.genoma),
+                        self.rng,
+                        tasa_insercion=self.tasa_insercion,
+                        tasa_delecion=self.tasa_delecion,
                     )
-                    self.genoma_hijo[self.write_head] = instruccion_final
-                    if hubo_mutacion:
+                    self.genoma_hijo.extend(nuevas_instrucciones)
+                    self.write_head = len(self.genoma_hijo)
+                    if tipo_evento is not None:
                         self.mutaciones_ocurridas += 1
-                    self.write_head += 1
+                        if tipo_evento == "sustitucion":
+                            self.mutaciones_sustitucion += 1
+                        elif tipo_evento == "insercion":
+                            self.mutaciones_insercion += 1
+                        elif tipo_evento == "delecion":
+                            self.mutaciones_delecion += 1
             self.read_head = (self.read_head + 1) % len(self.genoma)
 
         elif instr.opcode == "h-divide":
-            # La división solo se completa si la cría quedó totalmente
-            # copiada. Si el organismo pide dividirse antes de tiempo (un
-            # genoma "torpe", o -- en sub-fases futuras -- mutado de forma
-            # que rompe su propio bucle de copia), la división simplemente
-            # no ocurre: no es un error, es un organismo que falla en
-            # reproducirse, que es exactamente lo que la selección natural
-            # debe poder penalizar más adelante.
-            if self.genoma_hijo is not None and all(i is not None for i in self.genoma_hijo):
+            # A partir de la Fase 7, la división se completa con
+            # cualquier cría no vacía -- ya no hay un tamaño objetivo
+            # numérico contra el cual comparar (ver docs/arquitectura.md).
+            # Es el propio organismo quien decide cuándo copiar lo
+            # suficiente antes de dividirse (con jmp-vuelta-etiqueta, por
+            # ejemplo); h-divide confía en esa decisión, igual que Avida
+            # real. Un genoma que divide con una cría casi vacía obtiene
+            # una cría defectuosa -- eso lo penaliza la selección, no el
+            # mecanismo de copia.
+            if self.genoma_hijo is not None and len(self.genoma_hijo) >= LONGITUD_MINIMA_HIJO:
                 self.replicacion_completa = True
 
         elif instr.opcode == "input":
@@ -203,10 +263,39 @@ class CPU:
                         self.tareas_resueltas.add(tarea)
                         self.merit *= BONUS_MERITO[tarea]
 
+        elif instr.opcode in ("nop-a", "nop-b", "nop-c"):
+            pass  # marcadores de etiqueta: no hacen nada al ejecutarse
+
+        elif instr.opcode == "jmp-etiqueta":
+            destino = self._buscar_complemento(self._leer_etiqueta_propia())
+            if destino is not None:
+                salto_absoluto = destino
+
+        elif instr.opcode == "jmp-cero-etiqueta":
+            (r,) = instr.args
+            if self._leer(r) == 0:
+                destino = self._buscar_complemento(self._leer_etiqueta_propia())
+                if destino is not None:
+                    salto_absoluto = destino
+
+        elif instr.opcode == "jmp-vuelta-etiqueta":
+            # Salta solo si el read_head completó una vuelta entera al
+            # genoma circular (volvió a 0 tras haber copiado al menos una
+            # instrucción) -- la condición de salida del bucle de
+            # auto-copia, sin necesitar contar cuántas instrucciones tiene
+            # el genoma (ver el genoma ancestral por etiquetas).
+            if self.genoma_hijo and self.read_head == 0:
+                destino = self._buscar_complemento(self._leer_etiqueta_propia())
+                if destino is not None:
+                    salto_absoluto = destino
+
         else:
             raise ValueError(f"Opcode no soportado en esta sub-fase: {instr.opcode!r}")
 
-        self.ip = (self.ip + (salto if salto is not None else 1)) % len(self.genoma)
+        if salto_absoluto is not None:
+            self.ip = salto_absoluto % len(self.genoma)
+        else:
+            self.ip = (self.ip + (salto if salto is not None else 1)) % len(self.genoma)
         self.instrucciones_ejecutadas += 1
 
     def run(self, max_pasos: int) -> None:

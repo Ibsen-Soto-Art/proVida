@@ -47,4 +47,23 @@ ARIDAD_OPCODES = {
     # ambiente evalúa contra las tareas lógicas conocidas.
     "input": 1,
     "output": 1,
+    # Direccionamiento por contenido (Fase 7): tres nops distintos que
+    # sirven como "etiquetas" -- un salto no dice "ve a la posición X",
+    # dice "ve a donde encuentres la secuencia de nops complementaria a
+    # la mía". Esto hace que el código de replicación sea robusto a
+    # cambios de tamaño del genoma, lo cual jmp/jmp-if-zero (con offsets
+    # numéricos) no pueden ofrecer -- ver docs/arquitectura.md.
+    "nop-a": 0,
+    "nop-b": 0,
+    "nop-c": 0,
+    "jmp-etiqueta": 0,
+    "jmp-cero-etiqueta": 1,
+    "jmp-vuelta-etiqueta": 0,
 }
+
+# Complemento cíclico de cada nop-etiqueta: A->B->C->A. Un salto por
+# etiqueta busca la secuencia COMPLEMENTARIA a la que sigue inmediatamente
+# después de sí mismo, no una copia idéntica -- así una instrucción nunca
+# encuentra su propia etiqueta como blanco por accidente.
+COMPLEMENTO_NOP = {"nop-a": "nop-b", "nop-b": "nop-c", "nop-c": "nop-a"}
+NOPS_ETIQUETA = frozenset(COMPLEMENTO_NOP)

@@ -105,7 +105,11 @@ class Mundo:
 
     def _procesar_nacimiento(self, fila: int, columna: int, cpu_padre: CPU) -> None:
         genoma_hijo = cpu_padre.genoma_hijo
-        assert genoma_hijo is not None and all(i is not None for i in genoma_hijo)
+        # Desde la Fase 7 la cría es una lista que crece con cada h-copy
+        # (no un arreglo de tamaño fijo), así que "completa" ya no
+        # significa "sin huecos" -- solo que no esté vacía (ver h-divide
+        # en provida/vm/cpu.py).
+        assert genoma_hijo is not None and len(genoma_hijo) > 0
 
         cpu_hijo = CPU(
             list(genoma_hijo),
@@ -116,6 +120,8 @@ class Mundo:
             id_organismo=self._nuevo_id(),
             generacion=cpu_padre.generacion + 1,
             id_padre=cpu_padre.id_organismo,
+            tasa_insercion=cpu_padre.tasa_insercion,
+            tasa_delecion=cpu_padre.tasa_delecion,
         )
         # La cría hereda también qué tareas ya tiene "acreditadas" -- si no,
         # al ejecutar el mismo genoma y volver a resolver las mismas

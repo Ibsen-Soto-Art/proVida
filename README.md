@@ -41,9 +41,11 @@ python3 examples/demo_poblacion.py           # una rejilla se llena de organismo
 python3 examples/demo_tareas.py              # tareas lógicas como fuente de merit
 python3 examples/demo_seleccion_natural.py   # selección natural emergente, verificada
 python3 examples/demo_laboratorio.py         # gráficas: fitness, generación y árbol filogenético
+python3 examples/demo_genoma_por_etiquetas.py  # auto-replicación sin conocer el tamaño del genoma (Fase 7)
+python3 examples/demo_evolucion_tamano.py    # el tamaño del genoma evoluciona vía inserción/deleción (Fase 7)
 ```
 
-El último requiere las dependencias de análisis: `pip install -e ".[analisis]"`.
+`demo_laboratorio.py` y `demo_evolucion_tamano.py` requieren las dependencias de análisis: `pip install -e ".[analisis]"`.
 
 ## Licencia
 

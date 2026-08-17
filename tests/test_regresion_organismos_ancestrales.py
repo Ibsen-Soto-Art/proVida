@@ -60,17 +60,22 @@ def test_regresion_ancestro_se_replica_en_exactamente_61_pasos():
 
 def test_regresion_mutacion_con_semilla_7_produce_esta_mutacion_exacta():
     # Semilla y tasa fijas (0.05) conocidas desde la sub-fase 3: la única
-    # mutación cae sobre la instrucción h-copy (índice 8), convirtiéndola
-    # en `push BX`. Es EL ejemplo que usamos para explicar mutación letal
-    # -- si esta prueba falla, esa narrativa deja de ser cierta también.
+    # mutación cae sobre la instrucción h-copy (índice 8). El opcode
+    # exacto en el que se convierte depende de CUÁNTOS opcodes hay en el
+    # set (rng.choice sobre una lista más larga mapea la misma tirada a
+    # otro resultado) -- cambió de `push BX` a `input BX` en la Fase 7,
+    # al agregar las instrucciones de etiqueta. Es un cambio esperado y
+    # documentado, no una regresión real: la mutación sigue cayendo en el
+    # mismo sitio (h-copy) y sigue siendo letal para la auto-replicación
+    # de la cría -- la narrativa de "mutación letal" se mantiene.
     cpu = CPU(GENOMA_ANCESTRAL, tasa_mutacion=0.05, rng=random.Random(7))
     cpu.run_hasta_replicar(max_pasos=200)
 
     assert cpu.mutaciones_ocurridas == 1
-    assert cpu.genoma_hijo[8] == I("push", ("BX",))
+    assert cpu.genoma_hijo[8] == I("input", ("BX",))
     # El resto del genoma debe seguir intacto.
     esperado = list(GENOMA_ANCESTRAL)
-    esperado[8] = I("push", ("BX",))
+    esperado[8] = I("input", ("BX",))
     assert cpu.genoma_hijo == esperado
 
 

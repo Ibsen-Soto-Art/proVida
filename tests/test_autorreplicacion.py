@@ -30,14 +30,28 @@ def test_h_copy_sin_h_alloc_previo_no_hace_nada_ni_falla():
     assert cpu.ip == 0  # genoma de una sola instrucción, circular
 
 
-def test_h_divide_con_copia_incompleta_no_completa_la_replicacion():
-    # Genoma de 5 instrucciones, pero solo copiamos 2 antes de dividir.
+def test_h_divide_con_copia_incompleta_completa_con_una_cria_truncada():
+    # Revisado en la Fase 7: con genoma_hijo como lista creciente (para
+    # soportar inserción/deleción), ya no existe un "tamaño objetivo"
+    # contra el cual comparar -- h-divide confía en que el organismo
+    # decidió copiar lo suficiente (igual que Avida real). Un h-divide
+    # prematuro SÍ completa, pero con una cría más corta y distinta al
+    # padre -- una cría defectuosa, no un error de la CPU.
     genoma = [I("h-alloc", ()), I("nop", ()), I("h-copy", ()), I("h-copy", ()), I("h-divide", ())]
     cpu = CPU(genoma)
     cpu.run(5)
     assert cpu.write_head == 2
+    assert cpu.replicacion_completa
+    assert cpu.genoma_hijo == [genoma[0], genoma[1]]
+    assert cpu.genoma_hijo != genoma  # la cría quedó truncada, no es una copia completa
+
+
+def test_h_divide_sin_haber_copiado_nada_no_completa():
+    genoma = [I("h-alloc", ()), I("h-divide", ())]
+    cpu = CPU(genoma)
+    cpu.run(2)
     assert not cpu.replicacion_completa
-    assert cpu.genoma_hijo == [genoma[0], genoma[1], None, None, None]
+    assert cpu.genoma_hijo == []
 
 
 def test_organismo_ancestral_se_autorreplica_completo():
