@@ -35,6 +35,7 @@ Todo el proceso de diseño está documentado en [`docs/`](docs/), fase por fase:
 - [Testing](docs/testing.md) — estrategia de pruebas: determinista, estadística, emergente y de regresión.
 - [Observabilidad](docs/observabilidad.md) — qué métricas se registran y por qué "generación" no es un contador de tiempo.
 - [Aprendizajes](docs/aprendizajes.md) — checklist de qué se aprendió construyendo esto.
+- [Despliegue](docs/despliegue.md) — runbook para subir el sitio estático al VPS.
 
 ## Desarrollo
 
