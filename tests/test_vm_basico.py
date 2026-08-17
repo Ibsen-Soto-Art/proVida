@@ -6,8 +6,20 @@ organismos ancestrales). Son verificaciones mínimas de que la CPU hace
 lo que dice que hace, para poder avanzar con confianza a la sub-fase 2.
 """
 
+import pytest
+
 from provida.vm.cpu import CPU, MASCARA_REGISTRO
 from provida.vm.instructions import Instruccion as I
+
+
+def test_genoma_vacio_lanza_error_al_construir():
+    with pytest.raises(ValueError):
+        CPU([])
+
+
+def test_opcode_no_reconocido_lanza_error():
+    with pytest.raises(ValueError):
+        CPU([I("opcode-inventado", ())]).step()
 
 
 def test_mov_copia_el_valor_del_registro_origen():

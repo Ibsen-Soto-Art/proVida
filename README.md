@@ -13,6 +13,7 @@ En desarrollo activo. Ver [docs/](docs/) para la documentación completa de dise
 - [Visión técnica](docs/vision-tecnica.md) — problema, objetivo de aprendizaje, alcance del MVP.
 - [Glosario](docs/glosario.md) — términos técnicos con su analogía biológica.
 - [Arquitectura](docs/arquitectura.md) — diseño de la VM, el lenguaje de instrucciones, el motor de mundo/población, mutación y tareas lógicas.
+- [Testing](docs/testing.md) — estrategia de pruebas: determinista, estadística, emergente y de regresión.
 
 ## Stack
 
@@ -24,7 +25,20 @@ Python 3.11+.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-pytest
+pytest -q --cov=provida --cov-report=term-missing
+```
+
+## Demos
+
+Cada sub-fase de desarrollo tiene un script ejecutable en [examples/](examples/) que demuestra el mecanismo correspondiente:
+
+```bash
+python3 examples/demo_genoma_fijo.py         # VM ejecutando un genoma fijo
+python3 examples/demo_autorreplicacion.py    # un organismo se copia a sí mismo
+python3 examples/demo_mutacion.py            # mutación durante la copia
+python3 examples/demo_poblacion.py           # una rejilla se llena de organismos
+python3 examples/demo_tareas.py              # tareas lógicas como fuente de merit
+python3 examples/demo_seleccion_natural.py   # selección natural emergente, verificada
 ```
 
 ## Licencia
