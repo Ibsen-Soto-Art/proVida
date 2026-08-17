@@ -28,6 +28,7 @@ class CPU:
         genoma: list[Instruccion],
         tasa_mutacion: float = 0.0,
         rng: random.Random | None = None,
+        merit: float = 1.0,
     ):
         if not genoma:
             raise ValueError("El genoma no puede estar vacío: no habría IP válido.")
@@ -54,6 +55,13 @@ class CPU:
         self.tasa_mutacion = tasa_mutacion
         self.rng = rng if rng is not None else random.Random()
         self.mutaciones_ocurridas = 0
+
+        # Merit: determina la probabilidad de que el planificador de la
+        # población elija a este organismo para ejecutar en cada turno
+        # (ver provida/world/grid.py). En esta sub-fase el valor por
+        # defecto es uniforme (1.0) para todos -- las tareas lógicas que
+        # lo modifican llegan en la sub-fase 5.
+        self.merit = merit
 
     def _leer(self, registro: str) -> int:
         return self.registros[registro]
@@ -127,25 +135,26 @@ class CPU:
             self.replicacion_completa = False
 
         elif instr.opcode == "h-copy":
-            if self.genoma_hijo is None:
-                raise RuntimeError(
-                    "h-copy ejecutado sin h-alloc previo: no hay genoma hijo "
-                    "donde escribir. Un genoma bien formado siempre reserva "
-                    "espacio antes de copiar."
-                )
-            # Si la cría ya está llena, la copia simplemente no tiene efecto
-            # -- el read_head del padre sigue avanzando (más abajo), pero
-            # no hay dónde más escribir. Evita un IndexError por un genoma
-            # que ejecuta más h-copy de los que necesita.
-            if self.write_head < len(self.genoma_hijo):
-                instruccion_original = self.genoma[self.read_head]
-                instruccion_final, hubo_mutacion = copiar_con_mutacion(
-                    instruccion_original, self.tasa_mutacion, len(self.genoma), self.rng
-                )
-                self.genoma_hijo[self.write_head] = instruccion_final
-                if hubo_mutacion:
-                    self.mutaciones_ocurridas += 1
-                self.write_head += 1
+            # Si no se reservó espacio antes (con h-alloc), la copia
+            # simplemente no ocurre: un genoma "torpe" -- de fábrica, o
+            # mutado -- no debe poder crashear la simulación entera. En
+            # una población con muchos organismos ejecutándose de forma
+            # continua e independiente, no hay quien valide de antemano
+            # que cada uno llame a sus instrucciones en el orden "correcto".
+            if self.genoma_hijo is not None:
+                # Si la cría ya está llena, la copia tampoco tiene efecto
+                # -- el read_head sigue avanzando (más abajo), pero no hay
+                # dónde más escribir. Evita un IndexError por un genoma
+                # que ejecuta más h-copy de los que necesita.
+                if self.write_head < len(self.genoma_hijo):
+                    instruccion_original = self.genoma[self.read_head]
+                    instruccion_final, hubo_mutacion = copiar_con_mutacion(
+                        instruccion_original, self.tasa_mutacion, len(self.genoma), self.rng
+                    )
+                    self.genoma_hijo[self.write_head] = instruccion_final
+                    if hubo_mutacion:
+                        self.mutaciones_ocurridas += 1
+                    self.write_head += 1
             self.read_head = (self.read_head + 1) % len(self.genoma)
 
         elif instr.opcode == "h-divide":

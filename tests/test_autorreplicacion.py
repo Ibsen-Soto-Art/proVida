@@ -1,7 +1,5 @@
 """Pruebas de humo para la Fase 4, sub-fase 2 (auto-replicación)."""
 
-import pytest
-
 from provida.vm.cpu import CPU
 from provida.vm.instructions import Instruccion as I
 
@@ -22,10 +20,14 @@ GENOMA_ANCESTRAL = [
 ]
 
 
-def test_h_copy_sin_h_alloc_previo_lanza_error():
+def test_h_copy_sin_h_alloc_previo_no_hace_nada_ni_falla():
+    # Revisado en la sub-fase 4: en una población, un genoma "torpe" (de
+    # fábrica o mutado) no debe poder crashear la simulación entera. Antes
+    # esto lanzaba RuntimeError; ahora es simplemente un no-op.
     cpu = CPU([I("h-copy", ())])
-    with pytest.raises(RuntimeError):
-        cpu.step()
+    cpu.step()  # no debe lanzar excepción
+    assert cpu.genoma_hijo is None
+    assert cpu.ip == 0  # genoma de una sola instrucción, circular
 
 
 def test_h_divide_con_copia_incompleta_no_completa_la_replicacion():
