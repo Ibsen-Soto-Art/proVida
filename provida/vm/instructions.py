@@ -17,11 +17,10 @@ class Instruccion(NamedTuple):
     args: tuple = ()
 
 
-# Aridad (número de operandos) de cada opcode soportado en esta sub-fase.
+# Aridad (número de operandos) de cada opcode soportado hasta esta sub-fase.
 # Sirve de referencia y de validación rápida al construir genomas a mano;
-# las instrucciones de auto-replicación (h-alloc, h-copy, h-divide) y de
-# entrada/salida (input, output) se añaden en las sub-fases 2 y 5, cuando
-# hay una CPU capaz de darles sentido.
+# las instrucciones de entrada/salida (input, output) se añaden en la
+# sub-fase 5, cuando exista un ambiente que les dé sentido.
 ARIDAD_OPCODES = {
     "nop": 0,
     "mov": 2,
@@ -33,4 +32,10 @@ ARIDAD_OPCODES = {
     "pop": 1,
     "jmp": 1,
     "jmp-if-zero": 2,
+    # Instrucciones de auto-replicación (Fase 4, sub-fase 2): permiten que
+    # un organismo lea su propio genoma y escriba una copia en un espacio
+    # nuevo, sin operar sobre registros -- por eso no llevan operandos.
+    "h-alloc": 0,
+    "h-copy": 0,
+    "h-divide": 0,
 }

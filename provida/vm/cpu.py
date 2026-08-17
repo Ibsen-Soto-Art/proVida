@@ -29,6 +29,15 @@ class CPU:
         self.ip = 0
         self.instrucciones_ejecutadas = 0
 
+        # Estado de auto-replicación. `genoma_hijo` es None hasta que el
+        # organismo ejecuta `h-alloc` -- intentar copiar sin haber
+        # reservado espacio antes es un error del genoma, no algo que la
+        # CPU deba tolerar en silencio (ver `h-copy` más abajo).
+        self.read_head = 0
+        self.write_head = 0
+        self.genoma_hijo: list[Instruccion | None] | None = None
+        self.replicacion_completa = False
+
     def _leer(self, registro: str) -> int:
         return self.registros[registro]
 
@@ -89,6 +98,44 @@ class CPU:
             if self._leer(r) == 0:
                 salto = offset
 
+        elif instr.opcode == "h-alloc":
+            # Reserva un genoma hijo del mismo tamaño que el propio y
+            # reinicia los heads. En el MVP el genoma nunca cambia de
+            # tamaño (solo hay mutación por sustitución), así que reservar
+            # exactamente `len(self.genoma)` casillas es suficiente -- en
+            # un modelo con inserción/deleción habría que reservar de más.
+            self.genoma_hijo = [None] * len(self.genoma)
+            self.read_head = 0
+            self.write_head = 0
+            self.replicacion_completa = False
+
+        elif instr.opcode == "h-copy":
+            if self.genoma_hijo is None:
+                raise RuntimeError(
+                    "h-copy ejecutado sin h-alloc previo: no hay genoma hijo "
+                    "donde escribir. Un genoma bien formado siempre reserva "
+                    "espacio antes de copiar."
+                )
+            # Si la cría ya está llena, la copia simplemente no tiene efecto
+            # -- el read_head del padre sigue avanzando (más abajo), pero
+            # no hay dónde más escribir. Evita un IndexError por un genoma
+            # que ejecuta más h-copy de los que necesita.
+            if self.write_head < len(self.genoma_hijo):
+                self.genoma_hijo[self.write_head] = self.genoma[self.read_head]
+                self.write_head += 1
+            self.read_head = (self.read_head + 1) % len(self.genoma)
+
+        elif instr.opcode == "h-divide":
+            # La división solo se completa si la cría quedó totalmente
+            # copiada. Si el organismo pide dividirse antes de tiempo (un
+            # genoma "torpe", o -- en sub-fases futuras -- mutado de forma
+            # que rompe su propio bucle de copia), la división simplemente
+            # no ocurre: no es un error, es un organismo que falla en
+            # reproducirse, que es exactamente lo que la selección natural
+            # debe poder penalizar más adelante.
+            if self.genoma_hijo is not None and all(i is not None for i in self.genoma_hijo):
+                self.replicacion_completa = True
+
         else:
             raise ValueError(f"Opcode no soportado en esta sub-fase: {instr.opcode!r}")
 
@@ -106,3 +153,18 @@ class CPU:
         """
         for _ in range(max_pasos):
             self.step()
+
+    def run_hasta_replicar(self, max_pasos: int) -> int:
+        """Ejecuta hasta que `h-divide` complete una replicación, o se agote `max_pasos`.
+
+        A diferencia de `run`, aquí el punto de parada sí es un concepto
+        del dominio: "el organismo terminó de reproducirse" es un evento
+        real, no un límite arbitrario. `max_pasos` sigue siendo necesario
+        como salvaguarda -- un genoma mal formado (o, más adelante, mutado)
+        podría no completar nunca la copia y quedar en bucle infinito.
+        """
+        pasos = 0
+        while not self.replicacion_completa and pasos < max_pasos:
+            self.step()
+            pasos += 1
+        return pasos
