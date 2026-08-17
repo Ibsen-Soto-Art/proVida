@@ -1,0 +1,33 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Bytecode y caché de Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Empaquetado / build
+*.egg-info/
+build/
+dist/
+
+# Datos de simulación generados (corridas, logs, métricas) — no versionar salidas, solo código
+/runs/
+/output/
+*.log
+
+# Entorno / secretos
+.env
+
+# Editores / IDE
+.vscode/
+.idea/
+*.swp
+
+# Sistema operativo
+.DS_Store

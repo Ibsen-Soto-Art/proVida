@@ -1,0 +1,18 @@
+[project]
+name = "provida"
+version = "0.1.0"
+description = "Simulador de vida digital inspirado en Avida — proyecto de aprendizaje de evolución digital"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
