@@ -2,7 +2,7 @@
 
 Simulador de vida digital inspirado en [Avida](https://en.wikipedia.org/wiki/Avida) (Ofria, Adami, Pennock — Michigan State University), construido desde cero como proyecto de aprendizaje: no reimplementa Avida, reconstruye sus principios para entenderlos a fondo.
 
-**[Ver el sitio en vivo →](https://proVida.ibsen-soto.pro)** — hallazgos y gráficas de un experimento real corrido con este código.
+**[Ver el sitio en vivo →](https://proVida.ibsen-soto.pro)** — hallazgos y gráficas de un experimento real corrido con este código. **[Ver la simulación corriendo en vivo →](https://proVida.ibsen-soto.pro/vivo/)** — cada visitante recibe su propia rejilla evolucionando en tiempo real.
 
 ## Qué es
 
@@ -76,7 +76,7 @@ docker run -p 8080:80 provida-sitio
 
 ## Demo web interactiva
 
-A diferencia del sitio estático (una foto de una corrida ya hecha), `webapp/` transmite una simulación **en vivo** por WebSocket: cada visitante recibe su propia rejilla evolucionando en el servidor, con controles para pausar, reiniciar y ajustar la tasa de mutación.
+**[proVida.ibsen-soto.pro/vivo →](https://proVida.ibsen-soto.pro/vivo/)** — a diferencia del sitio estático (una foto de una corrida ya hecha), `webapp/` transmite una simulación **en vivo** por WebSocket: cada visitante recibe su propia rejilla evolucionando en el servidor, con controles para pausar, reiniciar y ajustar la tasa de mutación.
 
 ```bash
 pip install -e ".[web]"
@@ -84,7 +84,7 @@ uvicorn webapp.main:app --reload
 # abrir http://127.0.0.1:8000/vivo/
 ```
 
-Preparada para desplegarse bajo `https://proVida.ibsen-soto.pro/vivo/` (mismo dominio del sitio estático, sin subdominio nuevo) — runbook en `docs/despliegue.md`.
+Desplegada bajo `/vivo` en el mismo dominio del sitio estático (sin subdominio nuevo) — runbook en `docs/despliegue.md`.
 
 ## Autor
 

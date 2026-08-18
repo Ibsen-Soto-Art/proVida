@@ -41,7 +41,7 @@ docker stop provida-sitio && docker rm provida-sitio
 docker run -d --name provida-sitio --restart unless-stopped -p 127.0.0.1:8084:80 provida-sitio
 ```
 
-## 2. Demo web en vivo — `proVida.ibsen-soto.pro/vivo`
+## 2. Demo web en vivo — `proVida.ibsen-soto.pro/vivo` (ya desplegado)
 
 A diferencia del sitio estático, esto necesita un **proceso persistente**: cada visitante mantiene su propia simulación corriendo en el servidor por WebSocket mientras tiene la página abierta. Vive bajo `/vivo` en el mismo dominio (no un subdominio nuevo) para no necesitar otro registro DNS ni otro certificado — ver `webapp/main.py`, que ya define todas sus rutas con ese prefijo.
 
