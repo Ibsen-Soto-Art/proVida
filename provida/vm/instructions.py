@@ -59,6 +59,13 @@ ARIDAD_OPCODES = {
     "jmp-etiqueta": 0,
     "jmp-cero-etiqueta": 1,
     "jmp-vuelta-etiqueta": 0,
+    # Presión de selección por temperatura (extensión post-Fase 8): el
+    # organismo "declara" su temperatura óptima a partir de un valor que
+    # él mismo calculó en un registro -- ni distinto conceptualmente de
+    # `output`, salvo que en vez de resolver una tarea puntual, fija un
+    # rasgo que el ambiente reevalúa continuamente (ver
+    # provida/tasks/temperatura.py).
+    "set-temperatura": 1,
 }
 
 # Complemento cíclico de cada nop-etiqueta: A->B->C->A. Un salto por

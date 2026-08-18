@@ -43,7 +43,7 @@ Todo el proceso de diseño está documentado en [`docs/`](docs/), fase por fase:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q --cov=provida --cov-report=term-missing   # 62 pruebas, 100% cobertura
+pytest -q --cov=provida --cov-report=term-missing   # 79 pruebas, 100% cobertura
 ```
 
 ## Demos
@@ -60,6 +60,7 @@ python3 examples/demo_seleccion_natural.py     # selección natural emergente, v
 python3 examples/demo_laboratorio.py           # gráficas: fitness, generación, árbol filogenético
 python3 examples/demo_genoma_por_etiquetas.py  # auto-replicación sin conocer el tamaño del genoma
 python3 examples/demo_evolucion_tamano.py      # el tamaño del genoma evoluciona vía indels
+python3 examples/demo_temperatura.py           # selección por un óptimo de temperatura que se mueve
 ```
 
 `demo_laboratorio.py` y `demo_evolucion_tamano.py` requieren `pip install -e ".[analisis]"`.

@@ -3,6 +3,7 @@ import random
 from provida.mutation.sustitucion import procesar_copia
 from provida.tasks.ambiente import Ambiente
 from provida.tasks.logicas import HISTORIAL_INPUTS_MAXIMO, BONUS_MERITO, tareas_resueltas_por_output
+from provida.tasks.temperatura import valor_a_temperatura
 from provida.vm.instructions import COMPLEMENTO_NOP, MASCARA_REGISTRO, NOPS_ETIQUETA, Instruccion
 
 # Límite de seguridad para el crecimiento del genoma hijo (Fase 7): un
@@ -37,6 +38,7 @@ class CPU:
         id_padre: int | None = None,
         tasa_insercion: float = 0.0,
         tasa_delecion: float = 0.0,
+        temperatura_optima: float | None = None,
     ):
         if not genoma:
             raise ValueError("El genoma no puede estar vacío: no habría IP válido.")
@@ -85,6 +87,13 @@ class CPU:
         self.ambiente = ambiente
         self.ultimos_inputs: list[int] = []
         self.tareas_resueltas: set[str] = set()
+
+        # Temperatura óptima declarada por el organismo (extensión post-
+        # Fase 8). None significa "nunca ejecutó set-temperatura" --
+        # tratado como neutral por provida.tasks.temperatura.factor_temperatura,
+        # así que un organismo (o un genoma entero de las fases anteriores)
+        # que nunca usa esta instrucción no se ve afectado en absoluto.
+        self.temperatura_optima = temperatura_optima
 
         # Metadatos de linaje (Fase 6): no afectan la ejecución en absoluto
         # -- son puramente para observabilidad (el registro de eventos y el
@@ -277,6 +286,16 @@ class CPU:
                 destino = self._buscar_complemento(self._leer_etiqueta_propia())
                 if destino is not None:
                     salto_absoluto = destino
+
+        elif instr.opcode == "set-temperatura":
+            # A diferencia de las tareas lógicas, esto no depende de un
+            # ambiente ni de inputs externos -- es un rasgo propio del
+            # organismo, calculado con sus propios registros. El ambiente
+            # (si existe) es quien decide más tarde, en cada turno del
+            # planificador, qué tan bien le sienta este valor -- ver
+            # provida/world/grid.py y provida/tasks/temperatura.py.
+            (r,) = instr.args
+            self.temperatura_optima = valor_a_temperatura(self._leer(r))
 
         elif instr.opcode == "jmp-vuelta-etiqueta":
             # Salta solo si el read_head completó una vuelta entera al

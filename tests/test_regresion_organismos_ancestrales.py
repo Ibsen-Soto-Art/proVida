@@ -119,8 +119,12 @@ def test_regresion_experimento_de_seleccion_con_semilla_2026():
     vivos = mundo.organismos_vivos()
     con_tarea = sum(1 for _, _, cpu in vivos if "NAND" in cpu.tareas_resueltas)
 
-    # Valores exactos observados al construir la demo de la sub-fase 6:
-    # con esta semilla, a los 100k turnos la rejilla está totalmente
-    # saturada y el genotipo con tarea desplazó por completo al control.
-    assert len(vivos) == 225
-    assert con_tarea == 225
+    # Valores exactos observados al construir la demo de la sub-fase 6.
+    # Cambiaron de 225/225 a 224/224 al agregar `set-temperatura` al set
+    # de instrucciones (extensión post-Fase 8): rng.choice sobre una
+    # lista de opcodes más larga mapea la misma secuencia de tiradas a
+    # resultados distintos -- el mismo efecto documentado en la Fase 7
+    # para la prueba de la mutación con semilla 7. Sigue siendo
+    # dominancia casi total del genotipo con tarea, la narrativa no cambia.
+    assert len(vivos) == 224
+    assert con_tarea == 224

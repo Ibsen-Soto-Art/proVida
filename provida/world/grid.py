@@ -1,6 +1,7 @@
 import random
 
 from provida.metrics.registro import RegistroEventos
+from provida.tasks.temperatura import factor_temperatura
 from provida.vm.cpu import CPU
 
 # Los 8 desplazamientos del vecindario de Moore (las 8 celdas alrededor de
@@ -71,6 +72,24 @@ class Mundo:
         df, dc = self.rng.choice(VECINDARIO_MOORE)
         return (fila + df) % self.alto, (columna + dc) % self.ancho
 
+    def _peso_efectivo(self, cpu: CPU) -> float:
+        """El peso que usa el sorteo del planificador: merit, ajustado
+        por qué tan bien encaja la temperatura óptima del organismo con
+        la temperatura actual del ambiente (extensión post-Fase 8).
+
+        A propósito NO se guarda este valor en `cpu.merit` -- el ajuste
+        por temperatura se recalcula en cada turno, porque el ambiente
+        puede haberse movido desde la última vez que este organismo fue
+        evaluado. Un organismo bien adaptado hoy puede dejar de estarlo
+        más adelante si la temperatura sigue cambiando y su linaje no la
+        alcanza a seguir.
+        """
+        if cpu.ambiente is None:
+            return cpu.merit
+        temperatura_actual = cpu.ambiente.temperatura_en(self.turno)
+        factor = factor_temperatura(cpu.temperatura_optima, temperatura_actual, cpu.ambiente.ancho_tolerancia)
+        return cpu.merit * factor
+
     def ejecutar_ciclo(self, instrucciones_por_turno: int = 1) -> None:
         """Un turno del planificador: elige un organismo (ponderado por
         merit) y le hace ejecutar hasta `instrucciones_por_turno`
@@ -88,7 +107,7 @@ class Mundo:
         if not vivos:
             return
 
-        pesos = [cpu.merit for _, _, cpu in vivos]
+        pesos = [self._peso_efectivo(cpu) for _, _, cpu in vivos]
         fila, columna, cpu = self.rng.choices(vivos, weights=pesos, k=1)[0]
 
         for _ in range(instrucciones_por_turno):
@@ -122,6 +141,7 @@ class Mundo:
             id_padre=cpu_padre.id_organismo,
             tasa_insercion=cpu_padre.tasa_insercion,
             tasa_delecion=cpu_padre.tasa_delecion,
+            temperatura_optima=cpu_padre.temperatura_optima,
         )
         # La cría hereda también qué tareas ya tiene "acreditadas" -- si no,
         # al ejecutar el mismo genoma y volver a resolver las mismas
