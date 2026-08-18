@@ -15,15 +15,33 @@
   body {
     margin: 0; font-family: var(--font-body); background: var(--bg); color: var(--text);
     min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem;
+    width: 100%; overflow-x: hidden;
   }
-  h1 { font-family: var(--font-mono); font-size: 1.6rem; margin: 0 0 0.3rem; }
+  h1 { font-family: var(--font-mono); font-size: 1.6rem; margin: 0 0 0.3rem; text-align: center; }
   p.sub { color: var(--muted); margin: 0 0 1.5rem; text-align: center; max-width: 480px; }
   .panel {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     padding: 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;
+    width: 100%; max-width: 400px;
   }
-  canvas { border-radius: 8px; border: 1px solid var(--border); image-rendering: pixelated; }
+  .lienzo-envoltura { position: relative; width: 100%; max-width: 360px; aspect-ratio: 1 / 1; }
+  canvas#rejilla {
+    border-radius: 8px; border: 1px solid var(--border); image-rendering: pixelated;
+    width: 100%; height: 100%; display: block;
+  }
+  canvas#grafica-tendencia {
+    border-radius: 8px; border: 1px solid var(--border);
+    width: 100%; height: auto; max-width: 336px; display: block;
+  }
+  .overlay-estado {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    text-align: center; padding: 1rem; border-radius: 8px; font-size: 0.9rem;
+    background: rgba(11, 18, 32, 0.9);
+  }
+  .overlay-estado.cargando { color: var(--muted); }
+  .overlay-estado.error { color: var(--accent); }
   .controles { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; align-items: center; }
+  input[type="range"] { max-width: 110px; }
   button {
     font-family: var(--font-body); font-size: 0.9rem; padding: 0.5rem 1rem; border-radius: 6px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
@@ -43,11 +61,17 @@
 
   #controles-temperatura { display: none; }
 
-  #vista-analisis { width: 360px; display: flex; flex-direction: column; gap: 1rem; }
+  #vista-analisis { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 1rem; }
   #vista-analisis h2 { font-family: var(--font-mono); font-size: 1rem; margin: 0; }
   .composicion { display: flex; flex-direction: column; gap: 0.5rem; }
   .barra-fila { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
-  .barra-fila .etiqueta { width: 130px; color: var(--muted); text-align: right; flex-shrink: 0; }
+  .barra-fila .etiqueta { width: 110px; color: var(--muted); text-align: right; flex-shrink: 0; }
+
+  @media (max-width: 420px) {
+    body { padding: 1.25rem 0.5rem; }
+    .panel { padding: 1rem 0.75rem; }
+    .barra-fila .etiqueta { width: 90px; font-size: 0.75rem; }
+  }
   .barra-pista { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; height: 14px; overflow: hidden; }
   .barra-relleno { height: 100%; transition: width 0.2s; }
   .barra-fila .num { width: 42px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
@@ -68,7 +92,10 @@
       <button id="btn-modo-temperatura" class="modo-btn">Modo: Temperatura</button>
     </div>
 
-    <canvas id="rejilla" width="360" height="360"></canvas>
+    <div class="lienzo-envoltura">
+      <canvas id="rejilla" width="360" height="360"></canvas>
+      <div id="overlay-estado" class="overlay-estado"></div>
+    </div>
 
     <div class="controles">
       <button id="btn-pausar">Pausar</button>
@@ -279,21 +306,75 @@ function dibujarGraficaTendencia() {
   dibujarLinea("prop_b", 100, "#ea580c");          // porcentaje: 0-100
 }
 
-const protocolo = location.protocol === "https:" ? "wss" : "ws";
-const ws = new WebSocket(`${protocolo}://${location.host}/vivo/ws`);
-ws.onmessage = (evento) => dibujar(JSON.parse(evento.data));
+// --- Conexión con reintentos, estado de carga y mensaje de "servidor
+// lleno" -- ahora que esto es público, un visitante real puede llegar
+// justo cuando el servidor está al límite de conexiones, o perder la
+// conexión un instante (reinicio del contenedor, red inestable). Sin
+// esto, la página se queda congelada en el último cuadro sin explicar
+// por qué.
+let ws;
+let huboPrimerCuadro = false;
+let cierreEsperado = false;
+
+const overlay = document.getElementById("overlay-estado");
+function mostrarEstado(mensaje, tipo) {
+  if (!mensaje) {
+    overlay.style.display = "none";
+    return;
+  }
+  overlay.textContent = mensaje;
+  overlay.className = "overlay-estado " + tipo;
+  overlay.style.display = "flex";
+}
+
+function enviar(payload) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+}
+
+function conectar() {
+  mostrarEstado(huboPrimerCuadro ? "Se perdió la conexión. Reconectando…" : "Conectando…", "cargando");
+  const protocolo = location.protocol === "https:" ? "wss" : "ws";
+  // Se guarda en una variable LOCAL (además de en la global `ws`) para
+  // que los manejadores de este socket en particular puedan reconocer,
+  // más adelante, si siguen siendo la conexión activa -- sin esto, un
+  // socket viejo cuyo evento "close" llega tarde (después de que ya
+  // reconectamos con uno nuevo) vuelve a mostrar "Reconectando…" encima
+  // de una conexión que ya está funcionando bien. Encontrado simulando
+  // una caída del servidor con Chromium headless.
+  const miSocket = new WebSocket(`${protocolo}://${location.host}/vivo/ws`);
+  ws = miSocket;
+
+  miSocket.onmessage = (evento) => {
+    const datos = JSON.parse(evento.data);
+    if (datos.error === "servidor_lleno") {
+      cierreEsperado = true;
+      mostrarEstado("El servidor está al límite de conexiones simultáneas ahora mismo. Espera unos minutos y recarga la página.", "error");
+      return;
+    }
+    huboPrimerCuadro = true;
+    mostrarEstado(null);
+    dibujar(datos);
+  };
+
+  miSocket.onclose = () => {
+    if (miSocket !== ws || cierreEsperado) return;
+    mostrarEstado("Se perdió la conexión. Reconectando…", "cargando");
+    setTimeout(conectar, 2000);
+  };
+}
+conectar();
 
 function enviarReinicio(camposExtra = {}) {
   pausado = false;
   document.getElementById("btn-pausar").textContent = "Pausar";
-  ws.send(JSON.stringify({
+  enviar({
     accion: "reiniciar",
     modo: modoActual,
     tasa_mutacion: sliderTasa.value,
     temperatura_inicial: sliderTempInicial.value,
     tasa_cambio_temperatura: sliderTempTasa.value,
     ...camposExtra,
-  }));
+  });
 }
 
 function cambiarModo(nuevoModo) {
@@ -331,7 +412,7 @@ document.getElementById("btn-volver").addEventListener("click", () => {
 
 document.getElementById("btn-pausar").addEventListener("click", (e) => {
   pausado = !pausado;
-  ws.send(JSON.stringify({ accion: pausado ? "pausar" : "reanudar" }));
+  enviar({ accion: pausado ? "pausar" : "reanudar" });
   e.target.textContent = pausado ? "Reanudar" : "Pausar";
 });
 

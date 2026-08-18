@@ -208,8 +208,14 @@ async def simular(websocket: WebSocket):
     global conexiones_activas
 
     if conexiones_activas >= MAXIMO_CONEXIONES_SIMULTANEAS:
-        # Rechazar ANTES de aceptar: no vale la pena arrancar una
-        # simulación que de inmediato hay que descartar.
+        # Aceptamos primero, a propósito, solo para poder mandar un
+        # motivo legible -- cerrar ANTES de aceptar rechaza a nivel del
+        # handshake HTTP (403), y el WebSocket nativo del navegador no
+        # puede leer ese rechazo como un mensaje específico, solo como
+        # una conexión fallida genérica (indistinguible de un error de
+        # red). El costo de aceptar y cerrar de inmediato es mínimo.
+        await websocket.accept()
+        await websocket.send_json({"error": "servidor_lleno"})
         await websocket.close(code=1013)  # 1013 = "try again later"
         return
 
