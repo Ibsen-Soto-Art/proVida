@@ -211,10 +211,20 @@ async def receptor(websocket: WebSocket, estado: dict) -> None:
             datos = json.loads(mensaje)
         except json.JSONDecodeError:
             continue
+        if not isinstance(datos, dict):
+            # Un mensaje bien formado en JSON pero que no es un objeto
+            # (ej. `42` o `[1,2]`) no debe tumbar esta tarea -- si eso
+            # pasara, esta conexión se quedaría sin poder recibir
+            # pausar/reiniciar/cambiar de modo por el resto de la sesión,
+            # sin ningún aviso.
+            continue
         estado["accion"] = datos.get("accion")
         for campo in ("tasa_mutacion", "temperatura_inicial", "tasa_cambio_temperatura"):
             if campo in datos:
-                estado[campo] = float(datos[campo])
+                try:
+                    estado[campo] = float(datos[campo])
+                except (TypeError, ValueError):
+                    pass  # valor no numérico -- se ignora, no se tumba la tarea
         if "modo" in datos and datos["modo"] in ("tarea", "temperatura"):
             estado["modo"] = datos["modo"]
 

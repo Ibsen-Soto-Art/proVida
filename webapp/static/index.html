@@ -308,7 +308,13 @@ function dibujarGraficaTendencia() {
     gctx.beginPath();
     historial.forEach((punto, i) => {
       const px = x(punto.turno);
-      const py = cv.height - (punto[campo] / escalaMax) * cv.height;
+      // Un organismo en modo "tarea" puede, por coincidencia, resolver
+      // NOT además de NAND en el mismo output (ver docs/arquitectura.md)
+      // -- eso hace que merit_promedio pueda superar el máximo nominal
+      // de 8 (observado en la práctica: hasta ~10.6). Sin este límite,
+      // esos tramos se dibujan por encima del lienzo y la línea
+      // simplemente desaparece.
+      const py = Math.max(0, Math.min(cv.height, cv.height - (punto[campo] / escalaMax) * cv.height));
       if (i === 0) gctx.moveTo(px, py); else gctx.lineTo(px, py);
     });
     gctx.stroke();
