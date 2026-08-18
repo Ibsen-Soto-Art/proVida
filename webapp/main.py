@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from provida.tasks.ambiente import Ambiente
+from provida.tasks.temperatura import factor_temperatura
 from provida.vm.cpu import CPU
 from provida.vm.instructions import Instruccion as I
 from provida.world.grid import Mundo
@@ -165,7 +166,27 @@ def serializar(mundo: Mundo, ambiente: Ambiente, modo: str) -> dict:
                 celdas.append("control")
 
     vivos = mundo.organismos_vivos()
-    merit_promedio = sum(cpu.merit for _, _, cpu in vivos) / len(vivos) if vivos else 0.0
+
+    if modo == "temperatura":
+        # El merit crudo de un organismo NUNCA cambia en este modo (nadie
+        # resuelve tareas, así que nada lo multiplica) -- se queda fijo
+        # en 1.0 para todos, siempre. Lo que de verdad varía con la
+        # adaptación de la población es el PESO EFECTIVO que usa el
+        # planificador (merit × qué tan bien encaja la temperatura
+        # declarada con la actual), que normalmente se calcula al vuelo
+        # en Mundo._peso_efectivo y se descarta -- aquí se repite el
+        # mismo cálculo solo para poder mostrarlo. Mostrar el merit
+        # crudo en la interfaz sería mostrar un número que nunca se
+        # mueve, aunque la selección sí esté ocurriendo.
+        temperatura_actual = ambiente.temperatura_en(mundo.turno)
+        pesos = [
+            cpu.merit * factor_temperatura(cpu.temperatura_optima, temperatura_actual, ambiente.ancho_tolerancia)
+            for _, _, cpu in vivos
+        ]
+        metrica_promedio = sum(pesos) / len(pesos) if pesos else 0.0
+    else:
+        metrica_promedio = sum(cpu.merit for _, _, cpu in vivos) / len(vivos) if vivos else 0.0
+
     return {
         "modo": modo,
         "categoria_b": "calido" if modo == "temperatura" else "tarea",
@@ -174,7 +195,7 @@ def serializar(mundo: Mundo, ambiente: Ambiente, modo: str) -> dict:
         "celdas": celdas,
         "turno": mundo.turno,
         "poblacion": len(vivos),
-        "merit_promedio": round(merit_promedio, 2),
+        "merit_promedio": round(metrica_promedio, 3),
         "nacimientos": mundo.nacimientos,
         "reemplazos": mundo.reemplazos,
         "temperatura_actual": round(ambiente.temperatura_en(mundo.turno), 1) if modo == "temperatura" else None,

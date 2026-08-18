@@ -125,7 +125,7 @@
     <div class="stats">
       <span>turno <span class="v" id="stat-turno">0</span></span>
       <span>población <span class="v" id="stat-poblacion">0</span></span>
-      <span>merit promedio <span class="v" id="stat-merit">0</span></span>
+      <span><span id="etiqueta-merit">merit promedio</span> <span class="v" id="stat-merit">0</span></span>
       <span id="stat-temp-cont" style="display:none;">temperatura <span class="v" id="stat-temp">0</span>°C</span>
     </div>
     <div class="leyenda" id="leyenda"></div>
@@ -204,8 +204,20 @@ function actualizarLeyenda(modo) {
     .map((cat) => `<span><span class="punto" style="background:${COLORES[cat]}"></span> ${ETIQUETAS[cat]}</span>`)
     .join("");
   document.getElementById("descripcion-modo").textContent = DESCRIPCIONES_MODO[modo];
-  document.getElementById("titulo-grafica").textContent =
-    modo === "temperatura" ? "Merit promedio y % cálido, por turno" : "Merit promedio y % con tarea, por turno";
+
+  // En modo temperatura el merit crudo de un organismo nunca cambia
+  // (nadie resuelve tareas) -- el número que sí refleja la adaptación
+  // de la población es el peso efectivo (merit × qué tan bien encaja
+  // la temperatura), que el servidor manda en el mismo campo
+  // "merit_promedio" pero con otro significado. Por eso la etiqueta y
+  // la escala de la gráfica cambian según el modo, no solo el título.
+  if (modo === "temperatura") {
+    document.getElementById("etiqueta-merit").textContent = "peso efectivo promedio";
+    document.getElementById("titulo-grafica").textContent = "Peso efectivo y % cálido, por turno";
+  } else {
+    document.getElementById("etiqueta-merit").textContent = "merit promedio";
+    document.getElementById("titulo-grafica").textContent = "Merit promedio y % con tarea, por turno";
+  }
 }
 actualizarLeyenda("tarea");
 
@@ -302,7 +314,11 @@ function dibujarGraficaTendencia() {
     gctx.stroke();
   };
 
-  dibujarLinea("merit_promedio", 8, "#2563eb");   // merit va de 1 a 8 (bono ×8 de NAND)
+  // Escala distinta según el modo: en "tarea" el merit llega hasta 8
+  // (bono ×8 de NAND); en "temperatura" el peso efectivo nunca pasa de
+  // 1.0 (merit base × un factor que como mucho vale 1.0).
+  const escalaMeritOPeso = modoActual === "temperatura" ? 1 : 8;
+  dibujarLinea("merit_promedio", escalaMeritOPeso, "#2563eb");
   dibujarLinea("prop_b", 100, "#ea580c");          // porcentaje: 0-100
 }
 
