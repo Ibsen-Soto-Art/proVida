@@ -37,6 +37,15 @@
   .punto { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
   footer { color: var(--muted); font-size: 0.85rem; margin-top: 1.5rem; }
   footer a { color: var(--accent2); }
+
+  #vista-analisis { width: 360px; display: flex; flex-direction: column; gap: 1rem; }
+  #vista-analisis h2 { font-family: var(--font-mono); font-size: 1rem; margin: 0; }
+  .composicion { display: flex; flex-direction: column; gap: 0.5rem; }
+  .barra-fila { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
+  .barra-fila .etiqueta { width: 130px; color: var(--muted); text-align: right; flex-shrink: 0; }
+  .barra-pista { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; height: 14px; overflow: hidden; }
+  .barra-relleno { height: 100%; transition: width 0.2s; }
+  .barra-fila .num { width: 42px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 </style>
 </head>
 <body>
@@ -47,26 +56,51 @@
 </p>
 
 <div class="panel">
-  <canvas id="rejilla" width="360" height="360"></canvas>
-  <div class="controles">
-    <button id="btn-pausar">Pausar</button>
-    <button id="btn-reiniciar">Reiniciar</button>
-    <label style="display:flex; align-items:center; gap:0.5rem; color:var(--muted); font-size:0.85rem;">
-      Tasa de mutación
-      <input id="tasa-mutacion" type="range" min="0" max="0.05" step="0.0025" value="0.0075">
-      <span id="tasa-mutacion-valor" style="font-family:var(--font-mono); color:var(--text);">0.75%</span>
-    </label>
+
+  <div id="vista-rejilla">
+    <canvas id="rejilla" width="360" height="360"></canvas>
+    <div class="controles">
+      <button id="btn-pausar">Pausar</button>
+      <button id="btn-reiniciar">Reiniciar</button>
+      <button id="btn-ver-analisis">Ver análisis</button>
+      <label style="display:flex; align-items:center; gap:0.5rem; color:var(--muted); font-size:0.85rem;">
+        Tasa de mutación
+        <input id="tasa-mutacion" type="range" min="0" max="0.05" step="0.0025" value="0.0075">
+        <span id="tasa-mutacion-valor" style="font-family:var(--font-mono); color:var(--text);">0.75%</span>
+      </label>
+    </div>
+    <div class="stats">
+      <span>turno <span class="v" id="stat-turno">0</span></span>
+      <span>población <span class="v" id="stat-poblacion">0</span></span>
+      <span>merit promedio <span class="v" id="stat-merit">0</span></span>
+    </div>
+    <div class="leyenda">
+      <span><span class="punto" style="background:#64748b"></span> control (sin tarea)</span>
+      <span><span class="punto" style="background:#2563eb"></span> genotipo con tarea (aún sin resolverla)</span>
+      <span><span class="punto" style="background:#ea580c"></span> tarea resuelta (merit ×8)</span>
+    </div>
   </div>
-  <div class="stats">
-    <span>turno <span class="v" id="stat-turno">0</span></span>
-    <span>población <span class="v" id="stat-poblacion">0</span></span>
-    <span>merit promedio <span class="v" id="stat-merit">0</span></span>
+
+  <div id="vista-analisis" style="display:none;">
+    <h2>Composición actual de la población</h2>
+    <div class="composicion" id="composicion"></div>
+
+    <h2>Merit promedio y % con tarea, por turno</h2>
+    <canvas id="grafica-tendencia" width="336" height="150"></canvas>
+
+    <h2>Estadísticas acumuladas</h2>
+    <div class="stats" style="justify-content:flex-start; gap: 1rem 1.5rem;">
+      <span>turno <span class="v" id="an-turno">0</span></span>
+      <span>población <span class="v" id="an-poblacion">0</span></span>
+      <span>nacimientos <span class="v" id="an-nacimientos">0</span></span>
+      <span>reemplazos <span class="v" id="an-reemplazos">0</span></span>
+    </div>
+
+    <div class="controles">
+      <button id="btn-volver">← Volver a la simulación</button>
+    </div>
   </div>
-  <div class="leyenda">
-    <span><span class="punto" style="background:#64748b"></span> control (sin tarea)</span>
-    <span><span class="punto" style="background:#2563eb"></span> genotipo con tarea (aún sin resolverla)</span>
-    <span><span class="punto" style="background:#ea580c"></span> tarea resuelta (merit ×8)</span>
-  </div>
+
 </div>
 
 <footer>
@@ -82,29 +116,128 @@ const COLORES = {
   tarea_sin_resolver: "#2563eb",
   tarea: "#ea580c",
 };
+const ETIQUETAS = {
+  control: "Control (sin tarea)",
+  tarea_sin_resolver: "Con tarea (sin resolver)",
+  tarea: "Tarea resuelta (×8)",
+};
 
 let pausado = false;
+let vistaAnalisisActiva = false;
+
+// Historial acumulado en el navegador -- no le pide nada nuevo al
+// servidor más que lo que ya viene en cada cuadro. Se sigue llenando
+// aunque estés viendo la rejilla, así que al abrir el análisis ya hay
+// tendencia que mostrar. Se recorta cuando crece mucho, para no consumir
+// memoria sin límite en una sesión larga.
+const historial = [];
+const MAX_HISTORIAL = 2000;
 
 function dibujar(estado) {
   const tam = canvas.width / estado.ancho;
+  const conteo = { control: 0, tarea_sin_resolver: 0, tarea: 0 };
+
   ctx.fillStyle = "#0b1220";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (let fila = 0; fila < estado.alto; fila++) {
     for (let col = 0; col < estado.ancho; col++) {
       const categoria = estado.celdas[fila * estado.ancho + col];
       if (!categoria) continue;
+      conteo[categoria]++;
       ctx.fillStyle = COLORES[categoria];
       ctx.fillRect(col * tam, fila * tam, tam - 1, tam - 1);
     }
   }
+
   document.getElementById("stat-turno").textContent = estado.turno.toLocaleString("es-CO");
   document.getElementById("stat-poblacion").textContent = estado.poblacion;
   document.getElementById("stat-merit").textContent = estado.merit_promedio;
+
+  const propTarea = estado.poblacion > 0 ? (100 * conteo.tarea) / estado.poblacion : 0;
+  historial.push({
+    turno: estado.turno,
+    merit_promedio: estado.merit_promedio,
+    prop_tarea: propTarea,
+  });
+  if (historial.length > MAX_HISTORIAL) {
+    // Reduce a la mitad manteniendo uno de cada dos puntos -- conserva
+    // la forma general de la tendencia sin seguir creciendo sin límite.
+    for (let i = historial.length - 2; i >= 0; i -= 2) historial.splice(i, 1);
+  }
+
+  if (vistaAnalisisActiva) {
+    dibujarAnalisis(estado, conteo);
+  }
+}
+
+function dibujarAnalisis(estado, conteo) {
+  const contenedor = document.getElementById("composicion");
+  contenedor.innerHTML = "";
+  for (const categoria of ["tarea", "tarea_sin_resolver", "control"]) {
+    const n = conteo[categoria];
+    const pct = estado.poblacion > 0 ? (100 * n) / estado.poblacion : 0;
+    const fila = document.createElement("div");
+    fila.className = "barra-fila";
+    fila.innerHTML = `
+      <span class="etiqueta">${ETIQUETAS[categoria]}</span>
+      <span class="barra-pista"><span class="barra-relleno" style="width:${pct}%; background:${COLORES[categoria]}"></span></span>
+      <span class="num">${n}</span>
+    `;
+    contenedor.appendChild(fila);
+  }
+
+  document.getElementById("an-turno").textContent = estado.turno.toLocaleString("es-CO");
+  document.getElementById("an-poblacion").textContent = estado.poblacion;
+  document.getElementById("an-nacimientos").textContent = estado.nacimientos.toLocaleString("es-CO");
+  document.getElementById("an-reemplazos").textContent = estado.reemplazos.toLocaleString("es-CO");
+
+  dibujarGraficaTendencia();
+}
+
+function dibujarGraficaTendencia() {
+  const cv = document.getElementById("grafica-tendencia");
+  const gctx = cv.getContext("2d");
+  gctx.fillStyle = "#0b1220";
+  gctx.fillRect(0, 0, cv.width, cv.height);
+
+  if (historial.length < 2) return;
+
+  const turnoMin = historial[0].turno;
+  const turnoMax = historial[historial.length - 1].turno;
+  const rango = Math.max(1, turnoMax - turnoMin);
+  const x = (turno) => ((turno - turnoMin) / rango) * cv.width;
+
+  const dibujarLinea = (campo, escalaMax, color) => {
+    gctx.strokeStyle = color;
+    gctx.lineWidth = 2;
+    gctx.beginPath();
+    historial.forEach((punto, i) => {
+      const px = x(punto.turno);
+      const py = cv.height - (punto[campo] / escalaMax) * cv.height;
+      if (i === 0) gctx.moveTo(px, py); else gctx.lineTo(px, py);
+    });
+    gctx.stroke();
+  };
+
+  dibujarLinea("merit_promedio", 8, "#2563eb");   // merit va de 1 a 8 (bono ×8 de NAND)
+  dibujarLinea("prop_tarea", 100, "#ea580c");      // porcentaje: 0-100
 }
 
 const protocolo = location.protocol === "https:" ? "wss" : "ws";
 const ws = new WebSocket(`${protocolo}://${location.host}/vivo/ws`);
 ws.onmessage = (evento) => dibujar(JSON.parse(evento.data));
+
+document.getElementById("btn-ver-analisis").addEventListener("click", () => {
+  vistaAnalisisActiva = true;
+  document.getElementById("vista-rejilla").style.display = "none";
+  document.getElementById("vista-analisis").style.display = "flex";
+});
+
+document.getElementById("btn-volver").addEventListener("click", () => {
+  vistaAnalisisActiva = false;
+  document.getElementById("vista-analisis").style.display = "none";
+  document.getElementById("vista-rejilla").style.display = "block";
+});
 
 document.getElementById("btn-pausar").addEventListener("click", (e) => {
   pausado = !pausado;

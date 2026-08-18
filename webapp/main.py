@@ -107,6 +107,8 @@ def serializar(mundo: Mundo) -> dict:
         "turno": mundo.turno,
         "poblacion": len(vivos),
         "merit_promedio": round(merit_promedio, 2),
+        "nacimientos": mundo.nacimientos,
+        "reemplazos": mundo.reemplazos,
     }
 
 
