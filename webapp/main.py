@@ -202,6 +202,38 @@ def serializar(mundo: Mundo, ambiente: Ambiente, modo: str) -> dict:
     }
 
 
+def datos_individuo(cpu: CPU | None, fila: int, columna: int, modo: str) -> dict:
+    """Detalle de un solo organismo, para el modal de inspección --
+    a diferencia de `serializar()`, esto NO se manda en cada cuadro (sería
+    desperdiciar ancho de banda en datos que casi nadie pide todo el
+    tiempo); se calcula solo cuando alguien hace clic en una celda.
+    """
+    if cpu is None:
+        return {"tipo": "individuo", "vacio": True, "fila": fila, "columna": columna}
+
+    genoma_legible = [
+        f"{instr.opcode} {','.join(str(a) for a in instr.args)}" if instr.args else instr.opcode
+        for instr in cpu.genoma
+    ]
+    datos = {
+        "tipo": "individuo",
+        "vacio": False,
+        "fila": fila,
+        "columna": columna,
+        "id": cpu.id_organismo,
+        "id_padre": cpu.id_padre,
+        "generacion": cpu.generacion,
+        "merit": round(cpu.merit, 3),
+        "longitud_genoma": len(cpu.genoma),
+        "genoma": genoma_legible,
+    }
+    if modo == "temperatura":
+        datos["temperatura_optima"] = round(cpu.temperatura_optima, 1) if cpu.temperatura_optima is not None else None
+    else:
+        datos["tareas_resueltas"] = sorted(cpu.tareas_resueltas)
+    return datos
+
+
 async def receptor(websocket: WebSocket, estado: dict) -> None:
     """Corre en paralelo al bucle principal, escuchando mensajes de
     control del navegador (pausar/reanudar/reiniciar) sin bloquear el
@@ -227,6 +259,12 @@ async def receptor(websocket: WebSocket, estado: dict) -> None:
                     pass  # valor no numérico -- se ignora, no se tumba la tarea
         if "modo" in datos and datos["modo"] in ("tarea", "temperatura"):
             estado["modo"] = datos["modo"]
+        if "fila" in datos and "columna" in datos:
+            try:
+                estado["fila"] = int(datos["fila"])
+                estado["columna"] = int(datos["columna"])
+            except (TypeError, ValueError):
+                pass
 
 
 @router.get("/")
@@ -274,6 +312,18 @@ async def simular(websocket: WebSocket):
             elif accion == "reiniciar":
                 mundo, ambiente, modo = crear_mundo(estado)
                 corriendo = True
+            elif accion == "inspeccionar":
+                # No cambia `corriendo` ni consume el resto del turno --
+                # es una consulta de solo lectura, aparte del ciclo normal
+                # de simulación. Validamos los límites por si acaso: un
+                # clic en el navegador nunca debería mandar coordenadas
+                # fuera de la rejilla, pero nada impide que alguien mande
+                # el mensaje a mano por la consola.
+                fila = estado.get("fila")
+                columna = estado.get("columna")
+                if fila is not None and columna is not None and 0 <= fila < mundo.alto and 0 <= columna < mundo.ancho:
+                    cpu_inspeccionado = mundo.celdas[fila][columna]
+                    await websocket.send_json(datos_individuo(cpu_inspeccionado, fila, columna, modo))
 
             if corriendo:
                 turnos = TURNOS_POR_CUADRO_TEMPERATURA if modo == "temperatura" else TURNOS_POR_CUADRO_TAREA

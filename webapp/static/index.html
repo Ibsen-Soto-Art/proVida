@@ -75,6 +75,30 @@
   .barra-pista { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; height: 14px; overflow: hidden; }
   .barra-relleno { height: 100%; transition: width 0.2s; }
   .barra-fila .num { width: 42px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+
+  canvas#rejilla { cursor: pointer; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 1rem;
+  }
+  .modal-caja {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.5rem; max-width: 420px; width: 100%; max-height: 80vh; overflow-y: auto; position: relative;
+  }
+  .modal-caja h2 { font-family: var(--font-mono); font-size: 1.1rem; margin: 0 0 0.75rem; }
+  .modal-cerrar {
+    position: absolute; top: 0.6rem; right: 0.6rem; background: none; border: none;
+    color: var(--muted); font-size: 1.4rem; cursor: pointer; line-height: 1; padding: 0.3rem 0.6rem;
+  }
+  .modal-cerrar:hover { color: var(--text); }
+  .modal-stats { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.9rem; margin: 0 0 0.9rem; }
+  .modal-stats b { color: var(--accent2); font-variant-numeric: tabular-nums; }
+  .modal-genoma-titulo { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.4rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .modal-genoma {
+    font-family: var(--font-mono); font-size: 0.78rem; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.75rem; max-height: 220px; overflow-y: auto; white-space: pre; line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -153,6 +177,13 @@
 
 </div>
 
+<div id="modal-individuo" class="modal-overlay">
+  <div class="modal-caja">
+    <button id="btn-cerrar-modal" class="modal-cerrar" aria-label="Cerrar">×</button>
+    <div id="modal-contenido"></div>
+  </div>
+</div>
+
 <footer>
   Reporte con hallazgos ya analizados: <a href="/">proVida.ibsen-soto.pro</a> ·
   <a href="https://github.com/Ibsen-Soto-Art/proVida">código fuente</a>
@@ -221,12 +252,17 @@ function actualizarLeyenda(modo) {
 }
 actualizarLeyenda("tarea");
 
+let ultimoAncho = 18;
+let ultimoAlto = 18;
+
 function dibujar(estado) {
   if (estado.modo !== modoActual) {
     modoActual = estado.modo;
     historial = [];
     actualizarLeyenda(modoActual);
   }
+  ultimoAncho = estado.ancho;
+  ultimoAlto = estado.alto;
 
   const tam = canvas.width / estado.ancho;
   const conteo = {};
@@ -373,6 +409,15 @@ function conectar() {
       mostrarEstado("El servidor está al límite de conexiones simultáneas ahora mismo. Espera unos minutos y recarga la página.", "error");
       return;
     }
+    if (datos.tipo === "individuo") {
+      // Respuesta a un clic en una celda -- no es un cuadro de la
+      // simulación (no trae "celdas"), así que no debe pasar por
+      // dibujar(). Puede llegar intercalada entre cuadros normales
+      // (el servidor no deja de transmitir mientras la responde), por
+      // eso se distingue por este campo en vez de por orden de llegada.
+      mostrarModalIndividuo(datos);
+      return;
+    }
     huboPrimerCuadro = true;
     mostrarEstado(null);
     dibujar(datos);
@@ -461,6 +506,72 @@ sliderTempTasa.addEventListener("input", () => {
   valorTempTasa.textContent = (v >= 0 ? "+" : "") + v.toFixed(5);
 });
 sliderTempTasa.addEventListener("change", () => enviarReinicio());
+
+// --- Inspección de un organismo individual: clic en una celda de la
+// rejilla -> se le pide al servidor el detalle de ESE organismo puntual
+// (no viaja en cada cuadro -- sería desperdiciar ancho de banda en datos
+// que casi nadie pide todo el tiempo). La respuesta puede llegar
+// intercalada con cuadros normales de la simulación, que se sigue
+// transmitiendo igual mientras tanto.
+const modal = document.getElementById("modal-individuo");
+const modalContenido = document.getElementById("modal-contenido");
+
+canvas.addEventListener("click", (evento) => {
+  const rect = canvas.getBoundingClientRect();
+  // El canvas se muestra más chico que su resolución interna en
+  // pantallas angostas (CSS width:100% vs. el atributo width="360") --
+  // sin este reescalado, un clic en la mitad izquierda de un canvas
+  // achicado a la mitad apuntaría a la celda equivocada.
+  const escalaX = canvas.width / rect.width;
+  const escalaY = canvas.height / rect.height;
+  const xInterno = (evento.clientX - rect.left) * escalaX;
+  const yInterno = (evento.clientY - rect.top) * escalaY;
+  const tamCelda = canvas.width / ultimoAncho;
+  const columna = Math.floor(xInterno / tamCelda);
+  const fila = Math.floor(yInterno / (canvas.height / ultimoAlto));
+  if (fila < 0 || fila >= ultimoAlto || columna < 0 || columna >= ultimoAncho) return;
+  enviar({ accion: "inspeccionar", fila, columna });
+});
+
+function mostrarModalIndividuo(datos) {
+  if (datos.vacio) {
+    modalContenido.innerHTML = `
+      <h2>Celda vacía</h2>
+      <p style="color:var(--muted); margin:0;">No hay ningún organismo en la posición (${datos.fila}, ${datos.columna}) en este momento.</p>
+    `;
+  } else {
+    const filaExtra = datos.temperatura_optima !== undefined
+      ? `<div>Temperatura óptima: <b>${datos.temperatura_optima !== null ? datos.temperatura_optima + "°C" : "aún no declarada"}</b></div>`
+      : `<div>Tareas resueltas: <b>${datos.tareas_resueltas.length ? datos.tareas_resueltas.join(", ") : "ninguna"}</b></div>`;
+    const genomaConNumeros = datos.genoma
+      .map((linea, i) => `${String(i).padStart(2, "0")}  ${linea}`)
+      .join("\n");
+    modalContenido.innerHTML = `
+      <h2>Organismo #${datos.id}</h2>
+      <div class="modal-stats">
+        <div>Posición: <b>(${datos.fila}, ${datos.columna})</b></div>
+        <div>Generación: <b>${datos.generacion}</b> ${datos.id_padre !== null ? `— hijo de #${datos.id_padre}` : "— fundador"}</div>
+        <div>Merit: <b>${datos.merit}</b></div>
+        ${filaExtra}
+        <div>Longitud del genoma: <b>${datos.longitud_genoma}</b> instrucciones</div>
+      </div>
+      <p class="modal-genoma-titulo">Genoma completo</p>
+      <div class="modal-genoma">${genomaConNumeros}</div>
+    `;
+  }
+  modal.style.display = "flex";
+}
+
+function cerrarModal() {
+  modal.style.display = "none";
+}
+document.getElementById("btn-cerrar-modal").addEventListener("click", cerrarModal);
+modal.addEventListener("click", (evento) => {
+  if (evento.target === modal) cerrarModal(); // clic fuera de la caja
+});
+document.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape") cerrarModal();
+});
 </script>
 </body>
 </html>
