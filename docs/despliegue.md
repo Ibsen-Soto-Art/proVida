@@ -1,104 +1,106 @@
 # Despliegue — proVida en el VPS
 
-Runbook para subir el sitio estático de proVida a `proVida.ibsen-soto.pro`, en el mismo VPS Hetzner (Ubuntu 24.04, Nginx, Docker) donde ya corre Compra y Listo. El DNS tipo A ya apunta al servidor — solo falta la configuración del lado del servidor.
+VPS Hetzner (Ubuntu 24.04), Nginx corriendo en el host (systemd) como reverse proxy, cada proyecto en su propio contenedor Docker publicando en `127.0.0.1:PUERTO`. Un archivo por subdominio en `/etc/nginx/sites-enabled/`. Certbot gestiona el bloque SSL y el redirect HTTP→HTTPS automáticamente. Puertos ya ocupados por otros proyectos: 8081 (Compra y Listo), 8082 (Faceco), 8083 (Juicios Evaluativos).
 
-Ajusta los comandos exactos de Nginx/Docker al patrón que ya uses para tus otros proyectos del portafolio (docker-compose vs. contenedores sueltos, Nginx en el host vs. en contenedor) — abajo están las dos variantes más comunes.
-
-## 1. Clonar (o actualizar) el repo en el VPS
+## 1. Sitio estático de resultados — `proVida.ibsen-soto.pro` (ya desplegado)
 
 ```bash
-ssh tu_usuario@tu_vps
-
-# primera vez:
-git clone git@github.com:Ibsen-Soto-Art/proVida.git
-cd proVida
-
-# si ya existe:
-cd proVida && git pull
-```
-
-## 2. Construir la imagen
-
-```bash
+cd ~/proVida && git pull
 docker build -t provida-sitio -f sitio/Dockerfile .
-```
-
-Esto corre las simulaciones de referencia y genera el sitio dentro del build (ver `sitio/generar.py` y `sitio/Dockerfile`) — la imagen final solo contiene Nginx + los archivos estáticos, sin Python. Verificado localmente antes de este runbook: `docker build` + `docker run` + `curl` devolviendo 200 en `/` y en `/img/seleccion.png`.
-
-## 3. Correr el contenedor
-
-**Si usas contenedores sueltos con Nginx en el host** (reverse proxy a `127.0.0.1:PUERTO`):
-
-```bash
-# elige un puerto libre en el host, ej. 8091 (verifica que no choque con otros proyectos: `docker ps` / `ss -tlnp`)
 docker run -d --name provida-sitio --restart unless-stopped \
-  -p 127.0.0.1:8091:80 \
+  -p 127.0.0.1:8084:80 \
   provida-sitio
 ```
 
-**Si usas docker-compose con una red compartida** (Nginx en contenedor, sin publicar puertos al host):
-
-```yaml
-# docker-compose.yml (o el archivo que ya uses para agrupar tus proyectos)
-services:
-  provida-sitio:
-    build:
-      context: ./proVida
-      dockerfile: sitio/Dockerfile
-    container_name: provida-sitio
-    restart: unless-stopped
-    networks:
-      - tu_red_compartida  # la misma que usa el contenedor de Nginx
-```
-
-## 4. Configurar Nginx
-
-**Variante A — Nginx en el host:**
+Nginx (`/etc/nginx/sites-enabled/proVida.ibsen-soto.pro`, con el bloque SSL ya añadido por Certbot):
 
 ```nginx
-# /etc/nginx/sites-available/provida.ibsen-soto.pro
 server {
     listen 80;
+    listen [::]:80;
     server_name proVida.ibsen-soto.pro;
 
     location / {
-        proxy_pass http://127.0.0.1:8091;
+        proxy_pass http://127.0.0.1:8084;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
+Certificado: `sudo certbot --nginx -d proVida.ibsen-soto.pro` (ya hecho).
+
+**Actualizar el sitio más adelante** (el build corre las simulaciones desde cero, no hay contenido pre-generado versionado):
+
 ```bash
-sudo ln -s /etc/nginx/sites-available/provida.ibsen-soto.pro /etc/nginx/sites-enabled/
+cd ~/proVida && git pull
+docker build -t provida-sitio -f sitio/Dockerfile .
+docker stop provida-sitio && docker rm provida-sitio
+docker run -d --name provida-sitio --restart unless-stopped -p 127.0.0.1:8084:80 provida-sitio
+```
+
+## 2. Demo web en vivo — `proVida.ibsen-soto.pro/vivo`
+
+A diferencia del sitio estático, esto necesita un **proceso persistente**: cada visitante mantiene su propia simulación corriendo en el servidor por WebSocket mientras tiene la página abierta. Vive bajo `/vivo` en el mismo dominio (no un subdominio nuevo) para no necesitar otro registro DNS ni otro certificado — ver `webapp/main.py`, que ya define todas sus rutas con ese prefijo.
+
+**Reservas ya hechas para evitar choques:** puerto **8085** (siguiente libre tras el 8084 del sitio estático), y el propio código de `webapp/main.py` ya limita a 20 conexiones WebSocket simultáneas (rechaza el resto con código 1013) — una precaución razonable antes de exponer un proceso que corre indefinidamente por visitante en un VPS compartido con otros proyectos.
+
+```bash
+cd ~/proVida && git pull
+docker build -t provida-webapp -f webapp/Dockerfile .
+docker run -d --name provida-webapp --restart unless-stopped \
+  -p 127.0.0.1:8085:80 \
+  provida-webapp
+```
+
+Verifica que responde antes de tocar Nginx:
+
+```bash
+curl -I http://127.0.0.1:8085/vivo/
+```
+
+**Añade este bloque `location` dentro del `server` HTTPS existente** de `proVida.ibsen-soto.pro` (el que ya gestiona Certbot) — no crear un archivo nuevo, sino sumarle esta ruta al de arriba:
+
+```nginx
+    location /vivo/ {
+        proxy_pass http://127.0.0.1:8085;
+
+        # Necesario para WebSocket -- sin esto, Nginx trata la conexión
+        # como HTTP normal y el navegador nunca completa el handshake.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Los WebSocket son conexiones largas -- el timeout por defecto
+        # (60s) cortaría la simulación en vivo cada minuto.
+        proxy_read_timeout 3600s;
+    }
+```
+
+```bash
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-**Variante B — Nginx en contenedor:** agrega un `server` block equivalente a la configuración que ya usas para enrutar subdominios a contenedores por nombre de servicio (`proxy_pass http://provida-sitio:80;` en vez de `127.0.0.1:PUERTO`), siguiendo el mismo patrón que Compra y Listo.
-
-## 5. HTTPS
+**Verificar:**
 
 ```bash
-sudo certbot --nginx -d proVida.ibsen-soto.pro
+curl -I https://proVida.ibsen-soto.pro/vivo/
 ```
 
-(Omite este paso si ya tienes un wildcard cert o un flujo distinto para tus subdominios — usa el que ya tengas configurado.)
+Debe devolver `200 OK`. Para confirmar que el WebSocket también funciona de verdad, ábrelo en el navegador y confirma que la rejilla se mueve sola (no basta con que la página cargue).
 
-## 6. Verificar
-
-```bash
-curl -I https://proVida.ibsen-soto.pro
-```
-
-Debe devolver `200 OK`. Confírmame cuando esté arriba para dejarlo anotado como cerrado en `docs/aprendizajes.md`.
-
-## Actualizar el sitio más adelante
-
-Como el build corre las simulaciones desde cero (no hay contenido pre-generado versionado), actualizar el sitio con un nuevo experimento o cambio de código es:
+**Actualizar más adelante:**
 
 ```bash
-cd proVida && git pull
-docker build -t provida-sitio -f sitio/Dockerfile .
-docker stop provida-sitio && docker rm provida-sitio
-# vuelve a correr el `docker run` del paso 3 (o `docker compose up -d --build` si usas compose)
+cd ~/proVida && git pull
+docker build -t provida-webapp -f webapp/Dockerfile .
+docker stop provida-webapp && docker rm provida-webapp
+docker run -d --name provida-webapp --restart unless-stopped -p 127.0.0.1:8085:80 provida-webapp
 ```

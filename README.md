@@ -81,10 +81,10 @@ A diferencia del sitio estático (una foto de una corrida ya hecha), `webapp/` t
 ```bash
 pip install -e ".[web]"
 uvicorn webapp.main:app --reload
-# abrir http://127.0.0.1:8000
+# abrir http://127.0.0.1:8000/vivo/
 ```
 
-No está desplegada en el VPS todavía — corre localmente por ahora.
+Preparada para desplegarse bajo `https://proVida.ibsen-soto.pro/vivo/` (mismo dominio del sitio estático, sin subdominio nuevo) — runbook en `docs/despliegue.md`.
 
 ## Autor
 

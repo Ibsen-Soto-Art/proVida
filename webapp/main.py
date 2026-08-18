@@ -12,17 +12,33 @@ import asyncio
 import json
 import random
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 
 from provida.tasks.ambiente import Ambiente
 from provida.vm.cpu import CPU
 from provida.vm.instructions import Instruccion as I
 from provida.world.grid import Mundo
 
+# Todo vive bajo el prefijo /vivo -- no porque a la app le importe, sino
+# porque en el VPS comparte dominio con el sitio estático (Fase 8), que
+# ya ocupa la raíz. Nginx reenvía /vivo/* aquí tal cual, sin recortar el
+# prefijo, así que las rutas de FastAPI tienen que incluirlo también
+# (ver docs/despliegue.md).
+router = APIRouter(prefix="/vivo")
+
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="webapp/static"), name="static")
+app.mount("/vivo/static", StaticFiles(directory="webapp/static"), name="static")
+
+# Límite de conexiones simultáneas (buena práctica antes de exponer esto
+# en un VPS compartido con otros proyectos): cada conexión mantiene su
+# propia simulación corriendo indefinidamente en el servidor mientras
+# el visitante tenga la pestaña abierta -- sin un tope, muchas pestañas
+# abiertas a la vez podrían acaparar CPU del servidor.
+MAXIMO_CONEXIONES_SIMULTANEAS = 20
+conexiones_activas = 0
 
 # Mismos dos genotipos del experimento de selección natural (Fase 4,
 # sub-fase 6 / Fase 6): misma longitud exacta, para que la única ventaja
@@ -108,14 +124,23 @@ async def receptor(websocket: WebSocket, estado: dict) -> None:
             estado["tasa_mutacion"] = float(datos["tasa_mutacion"])
 
 
-@app.get("/")
+@router.get("/")
 async def index():
     return FileResponse("webapp/static/index.html")
 
 
-@app.websocket("/ws")
+@router.websocket("/ws")
 async def simular(websocket: WebSocket):
+    global conexiones_activas
+
+    if conexiones_activas >= MAXIMO_CONEXIONES_SIMULTANEAS:
+        # Rechazar ANTES de aceptar: no vale la pena arrancar una
+        # simulación que de inmediato hay que descartar.
+        await websocket.close(code=1013)  # 1013 = "try again later"
+        return
+
     await websocket.accept()
+    conexiones_activas += 1
     estado = {"accion": None, "tasa_mutacion": 0.0075}
     tarea_receptor = asyncio.create_task(receptor(websocket, estado))
 
@@ -136,9 +161,22 @@ async def simular(websocket: WebSocket):
             if corriendo:
                 mundo.ejecutar_ciclos(TURNOS_POR_CUADRO, instrucciones_por_turno=3)
 
+            # Un visitante puede cerrar la pestaña justo mientras este
+            # bucle está dormido en el `sleep` de abajo -- sin este
+            # chequeo, el próximo `send_json` lanza un RuntimeError (no
+            # un WebSocketDisconnect) porque uvicorn ya procesó el cierre
+            # del lado del cliente. Encontrado probando el límite de
+            # conexiones simultáneas con cierres en ráfaga.
+            if websocket.client_state != WebSocketState.CONNECTED:
+                break
+
             await websocket.send_json(serializar(mundo))
             await asyncio.sleep(INTERVALO_SEGUNDOS)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
+        conexiones_activas -= 1
         tarea_receptor.cancel()
+
+
+app.include_router(router)

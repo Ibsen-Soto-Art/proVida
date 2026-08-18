@@ -103,7 +103,7 @@ function dibujar(estado) {
 }
 
 const protocolo = location.protocol === "https:" ? "wss" : "ws";
-const ws = new WebSocket(`${protocolo}://${location.host}/ws`);
+const ws = new WebSocket(`${protocolo}://${location.host}/vivo/ws`);
 ws.onmessage = (evento) => dibujar(JSON.parse(evento.data));
 
 document.getElementById("btn-pausar").addEventListener("click", (e) => {
