@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>proVida — simulación en vivo</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #121b2e; --text: #e2e8f0; --muted: #94a3b8;
+    --accent: #ea580c; --accent2: #2563eb; --border: #1f2b45; --gris: #64748b;
+    --font-body: -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--font-body); background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem;
+  }
+  h1 { font-family: var(--font-mono); font-size: 1.6rem; margin: 0 0 0.3rem; }
+  p.sub { color: var(--muted); margin: 0 0 1.5rem; text-align: center; max-width: 480px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;
+  }
+  canvas { border-radius: 8px; border: 1px solid var(--border); image-rendering: pixelated; }
+  .controles { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
+  button {
+    font-family: var(--font-body); font-size: 0.9rem; padding: 0.5rem 1rem; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent2); }
+  button:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+  .stats { display: flex; gap: 1.5rem; font-family: var(--font-mono); font-size: 0.95rem; flex-wrap: wrap; justify-content: center; }
+  .stats .v { color: var(--accent2); font-variant-numeric: tabular-nums; }
+  .leyenda { display: flex; gap: 1.2rem; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; justify-content: center; }
+  .leyenda span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .punto { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  footer { color: var(--muted); font-size: 0.85rem; margin-top: 1.5rem; }
+  footer a { color: var(--accent2); }
+</style>
+</head>
+<body>
+<h1>proVida — simulación en vivo</h1>
+<p class="sub">
+  Dos genotipos de la misma longitud compiten por espacio: uno resuelve una tarea lógica (NAND) y gana merit ×8,
+  el otro no. Cada visitante recibe su propia simulación aislada, corriendo en el servidor.
+</p>
+
+<div class="panel">
+  <canvas id="rejilla" width="360" height="360"></canvas>
+  <div class="controles">
+    <button id="btn-pausar">Pausar</button>
+    <button id="btn-reiniciar">Reiniciar</button>
+    <label style="display:flex; align-items:center; gap:0.5rem; color:var(--muted); font-size:0.85rem;">
+      Tasa de mutación
+      <input id="tasa-mutacion" type="range" min="0" max="0.05" step="0.0025" value="0.0075">
+      <span id="tasa-mutacion-valor" style="font-family:var(--font-mono); color:var(--text);">0.75%</span>
+    </label>
+  </div>
+  <div class="stats">
+    <span>turno <span class="v" id="stat-turno">0</span></span>
+    <span>población <span class="v" id="stat-poblacion">0</span></span>
+    <span>merit promedio <span class="v" id="stat-merit">0</span></span>
+  </div>
+  <div class="leyenda">
+    <span><span class="punto" style="background:#64748b"></span> control (sin tarea)</span>
+    <span><span class="punto" style="background:#2563eb"></span> genotipo con tarea (aún sin resolverla)</span>
+    <span><span class="punto" style="background:#ea580c"></span> tarea resuelta (merit ×8)</span>
+  </div>
+</div>
+
+<footer>
+  Reporte con hallazgos ya analizados: <a href="/">proVida.ibsen-soto.pro</a> ·
+  <a href="https://github.com/Ibsen-Soto-Art/proVida">código fuente</a>
+</footer>
+
+<script>
+const canvas = document.getElementById("rejilla");
+const ctx = canvas.getContext("2d");
+const COLORES = {
+  control: "#64748b",
+  tarea_sin_resolver: "#2563eb",
+  tarea: "#ea580c",
+};
+
+let pausado = false;
+
+function dibujar(estado) {
+  const tam = canvas.width / estado.ancho;
+  ctx.fillStyle = "#0b1220";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let fila = 0; fila < estado.alto; fila++) {
+    for (let col = 0; col < estado.ancho; col++) {
+      const categoria = estado.celdas[fila * estado.ancho + col];
+      if (!categoria) continue;
+      ctx.fillStyle = COLORES[categoria];
+      ctx.fillRect(col * tam, fila * tam, tam - 1, tam - 1);
+    }
+  }
+  document.getElementById("stat-turno").textContent = estado.turno.toLocaleString("es-CO");
+  document.getElementById("stat-poblacion").textContent = estado.poblacion;
+  document.getElementById("stat-merit").textContent = estado.merit_promedio;
+}
+
+const protocolo = location.protocol === "https:" ? "wss" : "ws";
+const ws = new WebSocket(`${protocolo}://${location.host}/ws`);
+ws.onmessage = (evento) => dibujar(JSON.parse(evento.data));
+
+document.getElementById("btn-pausar").addEventListener("click", (e) => {
+  pausado = !pausado;
+  ws.send(JSON.stringify({ accion: pausado ? "pausar" : "reanudar" }));
+  e.target.textContent = pausado ? "Reanudar" : "Pausar";
+});
+
+document.getElementById("btn-reiniciar").addEventListener("click", () => {
+  pausado = false;
+  document.getElementById("btn-pausar").textContent = "Pausar";
+  ws.send(JSON.stringify({ accion: "reiniciar" }));
+});
+
+const sliderTasa = document.getElementById("tasa-mutacion");
+const valorTasa = document.getElementById("tasa-mutacion-valor");
+sliderTasa.addEventListener("input", () => {
+  valorTasa.textContent = (sliderTasa.value * 100).toFixed(2) + "%";
+});
+sliderTasa.addEventListener("change", () => {
+  ws.send(JSON.stringify({ accion: "reiniciar", tasa_mutacion: sliderTasa.value }));
+});
+</script>
+</body>
+</html>

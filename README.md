@@ -73,6 +73,18 @@ docker build -t provida-sitio -f sitio/Dockerfile .
 docker run -p 8080:80 provida-sitio
 ```
 
+## Demo web interactiva
+
+A diferencia del sitio estático (una foto de una corrida ya hecha), `webapp/` transmite una simulación **en vivo** por WebSocket: cada visitante recibe su propia rejilla evolucionando en el servidor, con controles para pausar, reiniciar y ajustar la tasa de mutación.
+
+```bash
+pip install -e ".[web]"
+uvicorn webapp.main:app --reload
+# abrir http://127.0.0.1:8000
+```
+
+No está desplegada en el VPS todavía — corre localmente por ahora.
+
 ## Autor
 
 [Ibsen Soto Art](https://portafolio.ibsen-soto.pro) — aprendiz SENA de Análisis y Desarrollo de Software (ADSO), con formación previa en Biología.
