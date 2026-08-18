@@ -23,13 +23,16 @@
     padding: 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;
   }
   canvas { border-radius: 8px; border: 1px solid var(--border); image-rendering: pixelated; }
-  .controles { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
+  .controles { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; align-items: center; }
   button {
     font-family: var(--font-body); font-size: 0.9rem; padding: 0.5rem 1rem; border-radius: 6px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
   }
   button:hover { border-color: var(--accent2); }
   button:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+  .modo-btn.activo { border-color: var(--accent2); color: var(--accent2); }
+  .slider-label { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.85rem; }
+  .slider-label .valor { font-family: var(--font-mono); color: var(--text); min-width: 3.5em; }
   .stats { display: flex; gap: 1.5rem; font-family: var(--font-mono); font-size: 0.95rem; flex-wrap: wrap; justify-content: center; }
   .stats .v { color: var(--accent2); font-variant-numeric: tabular-nums; }
   .leyenda { display: flex; gap: 1.2rem; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; justify-content: center; }
@@ -37,6 +40,8 @@
   .punto { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
   footer { color: var(--muted); font-size: 0.85rem; margin-top: 1.5rem; }
   footer a { color: var(--accent2); }
+
+  #controles-temperatura { display: none; }
 
   #vista-analisis { width: 360px; display: flex; flex-direction: column; gap: 1rem; }
   #vista-analisis h2 { font-family: var(--font-mono); font-size: 1rem; margin: 0; }
@@ -50,7 +55,7 @@
 </head>
 <body>
 <h1>proVida — simulación en vivo</h1>
-<p class="sub">
+<p class="sub" id="descripcion-modo">
   Dos genotipos de la misma longitud compiten por espacio: uno resuelve una tarea lógica (NAND) y gana merit ×8,
   el otro no. Cada visitante recibe su propia simulación aislada, corriendo en el servidor.
 </p>
@@ -58,34 +63,52 @@
 <div class="panel">
 
   <div id="vista-rejilla">
+    <div class="controles" style="margin-bottom: 0.75rem;">
+      <button id="btn-modo-tarea" class="modo-btn activo">Modo: Tarea lógica</button>
+      <button id="btn-modo-temperatura" class="modo-btn">Modo: Temperatura</button>
+    </div>
+
     <canvas id="rejilla" width="360" height="360"></canvas>
+
     <div class="controles">
       <button id="btn-pausar">Pausar</button>
       <button id="btn-reiniciar">Reiniciar</button>
       <button id="btn-ver-analisis">Ver análisis</button>
-      <label style="display:flex; align-items:center; gap:0.5rem; color:var(--muted); font-size:0.85rem;">
+    </div>
+    <div class="controles">
+      <label class="slider-label">
         Tasa de mutación
         <input id="tasa-mutacion" type="range" min="0" max="0.05" step="0.0025" value="0.0075">
-        <span id="tasa-mutacion-valor" style="font-family:var(--font-mono); color:var(--text);">0.75%</span>
+        <span class="valor" id="tasa-mutacion-valor">0.75%</span>
       </label>
     </div>
+    <div class="controles" id="controles-temperatura">
+      <label class="slider-label">
+        Temperatura inicial
+        <input id="temp-inicial" type="range" min="-40" max="40" step="1" value="-15">
+        <span class="valor" id="temp-inicial-valor">-15°C</span>
+      </label>
+      <label class="slider-label">
+        Tasa de cambio
+        <input id="temp-tasa" type="range" min="-0.001" max="0.001" step="0.00005" value="0.0003">
+        <span class="valor" id="temp-tasa-valor">+0.0003</span>
+      </label>
+    </div>
+
     <div class="stats">
       <span>turno <span class="v" id="stat-turno">0</span></span>
       <span>población <span class="v" id="stat-poblacion">0</span></span>
       <span>merit promedio <span class="v" id="stat-merit">0</span></span>
+      <span id="stat-temp-cont" style="display:none;">temperatura <span class="v" id="stat-temp">0</span>°C</span>
     </div>
-    <div class="leyenda">
-      <span><span class="punto" style="background:#64748b"></span> control (sin tarea)</span>
-      <span><span class="punto" style="background:#2563eb"></span> genotipo con tarea (aún sin resolverla)</span>
-      <span><span class="punto" style="background:#ea580c"></span> tarea resuelta (merit ×8)</span>
-    </div>
+    <div class="leyenda" id="leyenda"></div>
   </div>
 
   <div id="vista-analisis" style="display:none;">
     <h2>Composición actual de la población</h2>
     <div class="composicion" id="composicion"></div>
 
-    <h2>Merit promedio y % con tarea, por turno</h2>
+    <h2 id="titulo-grafica">Merit promedio y % con tarea, por turno</h2>
     <canvas id="grafica-tendencia" width="336" height="150"></canvas>
 
     <h2>Estadísticas acumuladas</h2>
@@ -115,35 +138,66 @@ const COLORES = {
   control: "#64748b",
   tarea_sin_resolver: "#2563eb",
   tarea: "#ea580c",
+  frio: "#2563eb",
+  calido: "#ea580c",
 };
 const ETIQUETAS = {
   control: "Control (sin tarea)",
   tarea_sin_resolver: "Con tarea (sin resolver)",
   tarea: "Tarea resuelta (×8)",
+  frio: "Frío (óptimo -15°C)",
+  calido: "Cálido (óptimo +15°C)",
+};
+const CATEGORIAS_POR_MODO = {
+  tarea: ["tarea", "tarea_sin_resolver", "control"],
+  temperatura: ["calido", "frio"],
+};
+const DESCRIPCIONES_MODO = {
+  tarea: "Dos genotipos de la misma longitud compiten por espacio: uno resuelve una tarea lógica (NAND) y gana merit ×8, el otro no. Cada visitante recibe su propia simulación aislada, corriendo en el servidor.",
+  temperatura: "Dos genotipos de la misma longitud, con distinta temperatura óptima (-15°C y +15°C), compiten mientras el ambiente se calienta o enfría según la tasa que elijas. Cada visitante recibe su propia simulación aislada.",
 };
 
 let pausado = false;
 let vistaAnalisisActiva = false;
+let modoActual = "tarea";
 
 // Historial acumulado en el navegador -- no le pide nada nuevo al
 // servidor más que lo que ya viene en cada cuadro. Se sigue llenando
 // aunque estés viendo la rejilla, así que al abrir el análisis ya hay
 // tendencia que mostrar. Se recorta cuando crece mucho, para no consumir
-// memoria sin límite en una sesión larga.
-const historial = [];
+// memoria sin límite en una sesión larga. Se reinicia al cambiar de modo
+// o al reiniciar -- comparar tendencias de dos experimentos distintos en
+// la misma gráfica no tendría sentido.
+let historial = [];
 const MAX_HISTORIAL = 2000;
 
-function dibujar(estado) {
-  const tam = canvas.width / estado.ancho;
-  const conteo = { control: 0, tarea_sin_resolver: 0, tarea: 0 };
+function actualizarLeyenda(modo) {
+  const leyenda = document.getElementById("leyenda");
+  leyenda.innerHTML = CATEGORIAS_POR_MODO[modo]
+    .map((cat) => `<span><span class="punto" style="background:${COLORES[cat]}"></span> ${ETIQUETAS[cat]}</span>`)
+    .join("");
+  document.getElementById("descripcion-modo").textContent = DESCRIPCIONES_MODO[modo];
+  document.getElementById("titulo-grafica").textContent =
+    modo === "temperatura" ? "Merit promedio y % cálido, por turno" : "Merit promedio y % con tarea, por turno";
+}
+actualizarLeyenda("tarea");
 
+function dibujar(estado) {
+  if (estado.modo !== modoActual) {
+    modoActual = estado.modo;
+    historial = [];
+    actualizarLeyenda(modoActual);
+  }
+
+  const tam = canvas.width / estado.ancho;
+  const conteo = {};
   ctx.fillStyle = "#0b1220";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (let fila = 0; fila < estado.alto; fila++) {
     for (let col = 0; col < estado.ancho; col++) {
       const categoria = estado.celdas[fila * estado.ancho + col];
       if (!categoria) continue;
-      conteo[categoria]++;
+      conteo[categoria] = (conteo[categoria] || 0) + 1;
       ctx.fillStyle = COLORES[categoria];
       ctx.fillRect(col * tam, fila * tam, tam - 1, tam - 1);
     }
@@ -153,15 +207,17 @@ function dibujar(estado) {
   document.getElementById("stat-poblacion").textContent = estado.poblacion;
   document.getElementById("stat-merit").textContent = estado.merit_promedio;
 
-  const propTarea = estado.poblacion > 0 ? (100 * conteo.tarea) / estado.poblacion : 0;
-  historial.push({
-    turno: estado.turno,
-    merit_promedio: estado.merit_promedio,
-    prop_tarea: propTarea,
-  });
+  const contTemp = document.getElementById("stat-temp-cont");
+  if (estado.modo === "temperatura") {
+    contTemp.style.display = "inline";
+    document.getElementById("stat-temp").textContent = estado.temperatura_actual;
+  } else {
+    contTemp.style.display = "none";
+  }
+
+  const propB = estado.poblacion > 0 ? (100 * (conteo[estado.categoria_b] || 0)) / estado.poblacion : 0;
+  historial.push({ turno: estado.turno, merit_promedio: estado.merit_promedio, prop_b: propB });
   if (historial.length > MAX_HISTORIAL) {
-    // Reduce a la mitad manteniendo uno de cada dos puntos -- conserva
-    // la forma general de la tendencia sin seguir creciendo sin límite.
     for (let i = historial.length - 2; i >= 0; i -= 2) historial.splice(i, 1);
   }
 
@@ -173,8 +229,8 @@ function dibujar(estado) {
 function dibujarAnalisis(estado, conteo) {
   const contenedor = document.getElementById("composicion");
   contenedor.innerHTML = "";
-  for (const categoria of ["tarea", "tarea_sin_resolver", "control"]) {
-    const n = conteo[categoria];
+  for (const categoria of CATEGORIAS_POR_MODO[estado.modo]) {
+    const n = conteo[categoria] || 0;
     const pct = estado.poblacion > 0 ? (100 * n) / estado.poblacion : 0;
     const fila = document.createElement("div");
     fila.className = "barra-fila";
@@ -220,12 +276,46 @@ function dibujarGraficaTendencia() {
   };
 
   dibujarLinea("merit_promedio", 8, "#2563eb");   // merit va de 1 a 8 (bono ×8 de NAND)
-  dibujarLinea("prop_tarea", 100, "#ea580c");      // porcentaje: 0-100
+  dibujarLinea("prop_b", 100, "#ea580c");          // porcentaje: 0-100
 }
 
 const protocolo = location.protocol === "https:" ? "wss" : "ws";
 const ws = new WebSocket(`${protocolo}://${location.host}/vivo/ws`);
 ws.onmessage = (evento) => dibujar(JSON.parse(evento.data));
+
+function enviarReinicio(camposExtra = {}) {
+  pausado = false;
+  document.getElementById("btn-pausar").textContent = "Pausar";
+  ws.send(JSON.stringify({
+    accion: "reiniciar",
+    modo: modoActual,
+    tasa_mutacion: sliderTasa.value,
+    temperatura_inicial: sliderTempInicial.value,
+    tasa_cambio_temperatura: sliderTempTasa.value,
+    ...camposExtra,
+  }));
+}
+
+function cambiarModo(nuevoModo) {
+  if (modoActual === nuevoModo) return;
+  modoActual = nuevoModo;
+  historial = [];
+  // No basta con dejar que dibujar() detecte el cambio de modo en el
+  // próximo cuadro del servidor: como ya actualizamos `modoActual` aquí
+  // mismo (de forma síncrona), esa comparación (`estado.modo !==
+  // modoActual`) nunca sería cierta y la leyenda se quedaría mostrando
+  // las etiquetas del modo anterior -- encontrado probando el cambio de
+  // modo con Chromium headless.
+  actualizarLeyenda(nuevoModo);
+
+  document.getElementById("btn-modo-tarea").classList.toggle("activo", nuevoModo === "tarea");
+  document.getElementById("btn-modo-temperatura").classList.toggle("activo", nuevoModo === "temperatura");
+  document.getElementById("controles-temperatura").style.display = nuevoModo === "temperatura" ? "flex" : "none";
+  enviarReinicio({ modo: nuevoModo });
+}
+
+document.getElementById("btn-modo-tarea").addEventListener("click", () => cambiarModo("tarea"));
+document.getElementById("btn-modo-temperatura").addEventListener("click", () => cambiarModo("temperatura"));
 
 document.getElementById("btn-ver-analisis").addEventListener("click", () => {
   vistaAnalisisActiva = true;
@@ -245,20 +335,29 @@ document.getElementById("btn-pausar").addEventListener("click", (e) => {
   e.target.textContent = pausado ? "Reanudar" : "Pausar";
 });
 
-document.getElementById("btn-reiniciar").addEventListener("click", () => {
-  pausado = false;
-  document.getElementById("btn-pausar").textContent = "Pausar";
-  ws.send(JSON.stringify({ accion: "reiniciar" }));
-});
+document.getElementById("btn-reiniciar").addEventListener("click", () => enviarReinicio());
 
 const sliderTasa = document.getElementById("tasa-mutacion");
 const valorTasa = document.getElementById("tasa-mutacion-valor");
 sliderTasa.addEventListener("input", () => {
   valorTasa.textContent = (sliderTasa.value * 100).toFixed(2) + "%";
 });
-sliderTasa.addEventListener("change", () => {
-  ws.send(JSON.stringify({ accion: "reiniciar", tasa_mutacion: sliderTasa.value }));
+sliderTasa.addEventListener("change", () => enviarReinicio());
+
+const sliderTempInicial = document.getElementById("temp-inicial");
+const valorTempInicial = document.getElementById("temp-inicial-valor");
+sliderTempInicial.addEventListener("input", () => {
+  valorTempInicial.textContent = sliderTempInicial.value + "°C";
 });
+sliderTempInicial.addEventListener("change", () => enviarReinicio());
+
+const sliderTempTasa = document.getElementById("temp-tasa");
+const valorTempTasa = document.getElementById("temp-tasa-valor");
+sliderTempTasa.addEventListener("input", () => {
+  const v = parseFloat(sliderTempTasa.value);
+  valorTempTasa.textContent = (v >= 0 ? "+" : "") + v.toFixed(5);
+});
+sliderTempTasa.addEventListener("change", () => enviarReinicio());
 </script>
 </body>
 </html>

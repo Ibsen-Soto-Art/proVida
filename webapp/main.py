@@ -6,6 +6,15 @@ Cada conexión WebSocket obtiene su PROPIA simulación aislada (su propio
 `Mundo`) -- así dos visitantes no interfieren entre sí, ni comparten
 estado. El navegador solo dibuja lo que el servidor le manda; toda la
 lógica de evolución sigue viviendo en provida/, sin duplicarse aquí.
+
+Dos "modos" de selección, mutuamente excluyentes -- combinarlos en un
+solo experimento (4 genotipos a la vez) sería más rico pero mucho más
+difícil de leer en una rejilla pequeña, así que cada modo tiene sus
+propios genotipos y controles:
+
+  - "tarea": el original -- NAND resuelto o no (ver Fase 4, sub-fase 6).
+  - "temperatura": frío vs. cálido, con un ambiente que se puede
+    calentar o enfriar en vivo (ver examples/demo_temperatura.py).
 """
 
 import asyncio
@@ -40,9 +49,16 @@ app.mount("/vivo/static", StaticFiles(directory="webapp/static"), name="static")
 MAXIMO_CONEXIONES_SIMULTANEAS = 20
 conexiones_activas = 0
 
-# Mismos dos genotipos del experimento de selección natural (Fase 4,
-# sub-fase 6 / Fase 6): misma longitud exacta, para que la única ventaja
-# real sea resolver la tarea, no copiarse más rápido.
+ANCHO = ALTO = 18
+POSICIONES_FUNDADORAS = [
+    (2, 2), (2, 15), (15, 2), (15, 15),
+    (8, 2), (2, 8), (15, 8), (8, 15),
+]
+INTERVALO_SEGUNDOS = 0.08
+
+# --------------------------------------------------------------------
+# Modo "tarea": dos genotipos de la misma longitud, uno resuelve NAND.
+# --------------------------------------------------------------------
 CONTROL = [
     I("h-alloc", ()), I("nop", ()), I("nop", ()), I("nop", ()), I("nop", ()),
     I("inc", ("CX",)), I("add", ("CX", "CX")), I("add", ("CX", "CX")),
@@ -60,27 +76,75 @@ TAREA = [
     I("jmp-if-zero", ("CX", 4)), I("h-copy", ()), I("dec", ("CX",)),
     I("jmp", (-3,)), I("h-divide", ()),
 ]
+TURNOS_POR_CUADRO_TAREA = 250
 
-ANCHO = ALTO = 18
-POSICIONES_FUNDADORAS = [
-    (2, 2), (2, 15), (15, 2), (15, 15),
-    (8, 2), (2, 8), (15, 8), (8, 15),
-]
-TURNOS_POR_CUADRO = 250
-INTERVALO_SEGUNDOS = 0.08
+# --------------------------------------------------------------------
+# Modo "temperatura": frío vs. cálido (ver examples/demo_temperatura.py).
+# Genoma ancestral por etiquetas (Fase 7) -- no necesita contar sus
+# propias instrucciones, así que el segmento que construye AX puede
+# tener cualquier longitud (con relleno para igualar entre genotipos).
+# --------------------------------------------------------------------
 
 
-def crear_mundo(tasa_mutacion: float) -> Mundo:
+def _construir_valor(registro: str, objetivo: int) -> list[I]:
+    bits = bin(objetivo)[2:]
+    instrucciones = [I("inc", (registro,))]
+    for bit in bits[1:]:
+        instrucciones.append(I("add", (registro, registro)))
+        if bit == "1":
+            instrucciones.append(I("inc", (registro,)))
+    return instrucciones
+
+
+_OBJETIVOS_TEMPERATURA = {"frio": 35, "calido": 65}  # -> -15.0°C y +15.0°C
+_SEGMENTOS_TEMPERATURA = {n: _construir_valor("AX", v) for n, v in _OBJETIVOS_TEMPERATURA.items()}
+_LONGITUD_MAXIMA_SEGMENTO = max(len(s) for s in _SEGMENTOS_TEMPERATURA.values())
+
+
+def _genoma_temperatura(nombre: str) -> list[I]:
+    construccion = _SEGMENTOS_TEMPERATURA[nombre]
+    relleno = [I("nop", ())] * (_LONGITUD_MAXIMA_SEGMENTO - len(construccion))
+    return (
+        [I("h-alloc", ())]
+        + construccion + relleno
+        + [I("set-temperatura", ("AX",))]
+        + [I("nop-a", ()), I("h-copy", ()), I("jmp-vuelta-etiqueta", ()), I("nop-a", ()),
+           I("jmp-etiqueta", ()), I("nop-c", ()), I("nop", ()), I("nop-b", ()), I("h-divide", ())]
+    )
+
+
+FRIO = _genoma_temperatura("frio")
+CALIDO = _genoma_temperatura("calido")
+# El mecanismo de etiquetas (búsqueda de complemento en cada salto) es
+# bastante más costoso por instrucción que los saltos numéricos del modo
+# "tarea" -- menos turnos por cuadro para que cada cuadro siga tomando
+# un tiempo de cómputo parecido y la demo no se sienta más lenta.
+TURNOS_POR_CUADRO_TEMPERATURA = 60
+
+
+def crear_mundo(estado: dict) -> tuple[Mundo, Ambiente, str]:
+    modo = estado["modo"]
     rng = random.Random()
-    ambiente = Ambiente()
     mundo = Mundo(ancho=ANCHO, alto=ALTO, rng=rng)
-    for i, (fila, columna) in enumerate(POSICIONES_FUNDADORAS):
-        genoma = CONTROL if i % 2 == 0 else TAREA
-        mundo.colocar(CPU(genoma, tasa_mutacion=tasa_mutacion, rng=rng, ambiente=ambiente), fila, columna)
-    return mundo
+
+    if modo == "temperatura":
+        ambiente = Ambiente(
+            temperatura_inicial=estado["temperatura_inicial"],
+            tasa_cambio_temperatura=estado["tasa_cambio_temperatura"],
+        )
+        for i, (fila, columna) in enumerate(POSICIONES_FUNDADORAS):
+            genoma = FRIO if i % 2 == 0 else CALIDO
+            mundo.colocar(CPU(genoma, tasa_mutacion=estado["tasa_mutacion"], rng=rng, ambiente=ambiente), fila, columna)
+    else:
+        ambiente = Ambiente()
+        for i, (fila, columna) in enumerate(POSICIONES_FUNDADORAS):
+            genoma = CONTROL if i % 2 == 0 else TAREA
+            mundo.colocar(CPU(genoma, tasa_mutacion=estado["tasa_mutacion"], rng=rng, ambiente=ambiente), fila, columna)
+
+    return mundo, ambiente, modo
 
 
-def serializar(mundo: Mundo) -> dict:
+def serializar(mundo: Mundo, ambiente: Ambiente, modo: str) -> dict:
     """Reduce el estado de la población a lo mínimo que el navegador
     necesita para dibujar un cuadro: una categoría por celda, no el
     genoma completo -- así el mensaje por WebSocket se queda pequeño
@@ -91,6 +155,8 @@ def serializar(mundo: Mundo) -> dict:
             cpu = mundo.celdas[fila][columna]
             if cpu is None:
                 celdas.append(None)
+            elif modo == "temperatura":
+                celdas.append("frio" if cpu.temperatura_optima is not None and cpu.temperatura_optima < 0 else "calido")
             elif "NAND" in cpu.tareas_resueltas:
                 celdas.append("tarea")
             elif cpu.genoma == TAREA:
@@ -101,6 +167,8 @@ def serializar(mundo: Mundo) -> dict:
     vivos = mundo.organismos_vivos()
     merit_promedio = sum(cpu.merit for _, _, cpu in vivos) / len(vivos) if vivos else 0.0
     return {
+        "modo": modo,
+        "categoria_b": "calido" if modo == "temperatura" else "tarea",
         "ancho": mundo.ancho,
         "alto": mundo.alto,
         "celdas": celdas,
@@ -109,6 +177,7 @@ def serializar(mundo: Mundo) -> dict:
         "merit_promedio": round(merit_promedio, 2),
         "nacimientos": mundo.nacimientos,
         "reemplazos": mundo.reemplazos,
+        "temperatura_actual": round(ambiente.temperatura_en(mundo.turno), 1) if modo == "temperatura" else None,
     }
 
 
@@ -122,8 +191,11 @@ async def receptor(websocket: WebSocket, estado: dict) -> None:
         except json.JSONDecodeError:
             continue
         estado["accion"] = datos.get("accion")
-        if "tasa_mutacion" in datos:
-            estado["tasa_mutacion"] = float(datos["tasa_mutacion"])
+        for campo in ("tasa_mutacion", "temperatura_inicial", "tasa_cambio_temperatura"):
+            if campo in datos:
+                estado[campo] = float(datos[campo])
+        if "modo" in datos and datos["modo"] in ("tarea", "temperatura"):
+            estado["modo"] = datos["modo"]
 
 
 @router.get("/")
@@ -143,10 +215,16 @@ async def simular(websocket: WebSocket):
 
     await websocket.accept()
     conexiones_activas += 1
-    estado = {"accion": None, "tasa_mutacion": 0.0075}
+    estado = {
+        "accion": None,
+        "modo": "tarea",
+        "tasa_mutacion": 0.0075,
+        "temperatura_inicial": -15.0,
+        "tasa_cambio_temperatura": 0.0003,
+    }
     tarea_receptor = asyncio.create_task(receptor(websocket, estado))
 
-    mundo = crear_mundo(estado["tasa_mutacion"])
+    mundo, ambiente, modo = crear_mundo(estado)
     corriendo = True
 
     try:
@@ -157,11 +235,12 @@ async def simular(websocket: WebSocket):
             elif accion == "reanudar":
                 corriendo = True
             elif accion == "reiniciar":
-                mundo = crear_mundo(estado["tasa_mutacion"])
+                mundo, ambiente, modo = crear_mundo(estado)
                 corriendo = True
 
             if corriendo:
-                mundo.ejecutar_ciclos(TURNOS_POR_CUADRO, instrucciones_por_turno=3)
+                turnos = TURNOS_POR_CUADRO_TEMPERATURA if modo == "temperatura" else TURNOS_POR_CUADRO_TAREA
+                mundo.ejecutar_ciclos(turnos, instrucciones_por_turno=3)
 
             # Un visitante puede cerrar la pestaña justo mientras este
             # bucle está dormido en el `sleep` de abajo -- sin este
@@ -172,7 +251,7 @@ async def simular(websocket: WebSocket):
             if websocket.client_state != WebSocketState.CONNECTED:
                 break
 
-            await websocket.send_json(serializar(mundo))
+            await websocket.send_json(serializar(mundo, ambiente, modo))
             await asyncio.sleep(INTERVALO_SEGUNDOS)
     except (WebSocketDisconnect, RuntimeError):
         pass
